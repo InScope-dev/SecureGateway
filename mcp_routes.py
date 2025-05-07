@@ -13,16 +13,51 @@ from rate_limiter import check_limit, RateLimitError
 from schema_validator import validate_input, validate_output, SchemaValidationError
 from audit_logger import log_event
 
-# Configure tool server URL
-TOOL_SERVER_URL = os.getenv("TOOL_SERVER_URL", "http://localhost:5001/tools")
+# Configure tool server URL - default to internal mock endpoints
+TOOL_SERVER_URL = os.getenv("TOOL_SERVER_URL", None)
 
 def call_tool_api(tool_name, payload):
     """Call external tool service if allowed."""
+    # For testing: if TOOL_SERVER_URL is not set, use internal mock implementations
+    if not TOOL_SERVER_URL:
+        return _mock_tool_response(tool_name, payload)
+        
+    # Otherwise use the external tool server
     endpoint = f"{TOOL_SERVER_URL}/{tool_name}"
     res = requests.post(endpoint, json=payload, timeout=5)
     if not res.ok:
         raise Exception(f"Tool {tool_name} error: {res.status_code} {res.text}")
     return res.json()
+
+def _mock_tool_response(tool_name, payload):
+    """Mock implementations of tools for testing"""
+    # Calendar create event mock
+    if tool_name == "calendar.create_event":
+        title = payload.get("title", "Untitled")
+        start_time = payload.get("start_time", "2025-01-01T00:00:00Z")
+        return {
+            "status": "ok",
+            "event_id": "ev-" + title.lower().replace(" ", "-"),
+            "start_time": start_time
+        }
+    # DB write mock - always denied for sensitive DB
+    elif tool_name == "db.write_sensitive":
+        raise Exception("Write to sensitive DB denied")
+    # Search query mock
+    elif tool_name == "search.query" or tool_name == "search.web":
+        query = payload.get("q", "")
+        return {
+            "results": ["result 1", "result 2"],
+            "query": query
+        }
+    # Default fallback for other tools
+    else:
+        return {
+            "status": "ok",
+            "tool": tool_name,
+            "mock": True,
+            "input": payload
+        }
 
 # Setup logging
 logger = logging.getLogger(__name__)

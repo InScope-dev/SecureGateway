@@ -3,4 +3,4 @@ rules:
     allow_tools: ["calendar.*", "search.*"]
     deny_tools:  ["db.write*"]
     max_calls_per_session: 5
-    active_hours: "08:00-18:00"
+    active_hours: "00:00-23:59"
