@@ -1,0 +1,31 @@
+# MCP-Sec Gateway Policy Configuration
+# Defines access control rules for different AI models
+
+rules:
+  # GPT-4 family rules
+  - model: "gpt-4*"
+    allow_tools: ["calendar.*", "search.*"]
+    deny_tools: ["db.write*"]
+    max_calls_per_session: 5
+    active_hours: "08:00-18:00"
+  
+  # Claude family rules
+  - model: "claude-*"
+    allow_tools: ["calendar.*", "search.*", "weather.*"]
+    deny_tools: ["finance.*", "admin.*"]
+    max_calls_per_session: 10
+    active_hours: "00:00-23:59"  # 24/7 access
+  
+  # Mistral rules
+  - model: "mistral*"
+    allow_tools: ["search.*", "calculator.*"]
+    deny_tools: ["calendar.delete*", "db.*", "admin.*"]
+    max_calls_per_session: 3
+    active_hours: "09:00-17:00"
+  
+  # Default rule for other models - restrictive
+  - model: "*"
+    allow_tools: ["calculator.basic", "search.public"]
+    deny_tools: ["*"]  # Deny everything not explicitly allowed
+    max_calls_per_session: 2
+    active_hours: "09:00-17:00"

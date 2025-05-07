@@ -1,0 +1,118 @@
+"""
+MCP-Sec Rate Limiter
+In-memory rate limiting for tool calls
+"""
+import time
+import logging
+from typing import Dict, Tuple, Any
+from policy_engine import POLICIES, check_policy
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+# Global usage tracking
+# Format: {(model_id, session_id): {'count': int, 'first_ts': float}}
+USAGE = {}
+
+# TTL in seconds (24 hours)
+TTL = 24 * 60 * 60
+
+class RateLimitError(Exception):
+    """Exception raised when a rate limit is exceeded"""
+    pass
+
+def check_limit(model_id: str, session_id: str) -> None:
+    """
+    Check if the request is within rate limits
+    
+    Args:
+        model_id: The ID of the model
+        session_id: The ID of the current session
+    
+    Raises:
+        RateLimitError: If the rate limit is exceeded
+    """
+    # Clean up old entries first
+    _cleanup_expired()
+    
+    # Create a key for this model-session pair
+    key = (model_id, session_id)
+    
+    # Initialize usage record if it doesn't exist
+    if key not in USAGE:
+        USAGE[key] = {
+            'count': 0,
+            'first_ts': time.time()
+        }
+    
+    # Find the applicable policy rule
+    max_calls = _get_max_calls(model_id)
+    
+    # If we found a limit, check if we're over it
+    if max_calls is not None:
+        current_count = USAGE[key]['count']
+        
+        if current_count >= max_calls:
+            logger.warning(f"Rate limit exceeded for {model_id}/{session_id}: {current_count}/{max_calls}")
+            raise RateLimitError(f"Rate limit exceeded: {current_count}/{max_calls} calls")
+    
+    # Increment the counter
+    USAGE[key]['count'] += 1
+    
+    logger.debug(f"Rate limit check passed for {model_id}/{session_id}: {USAGE[key]['count']}")
+
+def _cleanup_expired() -> None:
+    """Remove usage records older than the TTL"""
+    now = time.time()
+    expired_keys = []
+    
+    for key, data in USAGE.items():
+        if now - data['first_ts'] > TTL:
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        del USAGE[key]
+    
+    if expired_keys:
+        logger.debug(f"Cleaned up {len(expired_keys)} expired rate limit records")
+
+def _get_max_calls(model_id: str) -> int:
+    """
+    Get the maximum calls per session for this model
+    
+    Args:
+        model_id: The ID of the model
+    
+    Returns:
+        The maximum number of calls allowed, or None if no limit
+    """
+    # Default to none (no limit)
+    max_calls = None
+    
+    # Check each rule
+    if "rules" in POLICIES:
+        for rule in POLICIES["rules"]:
+            # If this rule doesn't match our model, skip it
+            model_pattern = rule.get("model", "")
+            if not model_pattern:
+                continue
+            
+            # Use the same pattern matching from policy_engine.py
+            from policy_engine import _match_pattern
+            if not _match_pattern(model_id, model_pattern):
+                continue
+            
+            # If we have a match, get the limit
+            rule_max_calls = rule.get("max_calls_per_session")
+            if rule_max_calls is not None:
+                # If we already have a limit, take the more restrictive one
+                if max_calls is None or rule_max_calls < max_calls:
+                    max_calls = rule_max_calls
+    
+    return max_calls
+
+def reset_limits() -> None:
+    """Reset all rate limits (for testing)"""
+    global USAGE
+    USAGE = {}
+    logger.info("Rate limits reset")
