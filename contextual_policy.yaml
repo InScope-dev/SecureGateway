@@ -13,7 +13,7 @@
   require_prior_successful_tool: "search.query"
 
 - when_tool: "calendar.create_event"
-  require_prior_successful_tool: "search.query"
+  require_prior_successful_tool: "search.web"
   
 - when_tool: "file.write"
   block_if_prompt_contains:
