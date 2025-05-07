@@ -459,26 +459,69 @@ def dash():
 <head>
 <title>MCP‑Sec Dashboard</title>
 <style>
-  body{font-family:Arial;margin:0;padding:0;background:#121212;color:#eee;}
-  header{padding:10px;background:#202020;display:flex;gap:20px;align-items:center;}
-  header input,header select,#config select,#config input{background:#303030;color:#fff;border:1px solid #555;padding:4px;}
-  #metrics{display:flex;gap:20px;margin:10px;}
-  .metric{padding:10px;background:#202020;border-radius:6px;}
-  table{width:100%;border-collapse:collapse;margin-top:10px;}
-  th,td{padding:6px 8px;border-bottom:1px solid #333;}
-  tr.allowed{background:#0b3d0b;} tr.denied{background:#4d0b0b;}
+  body{font-family:Arial,sans-serif;margin:0;padding:0;background:#121212;color:#eee;}
+  
+  /* Header and menu styles */
+  header{padding:15px;background:#202020;}
+  .main-menu{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+  .menu-button{background:#303030;color:#fff;border:1px solid #555;padding:8px 15px;
+    cursor:pointer;border-radius:4px;font-weight:bold;min-width:100px;transition:all 0.2s ease;}
+  .menu-button:hover{background:#404040;transform:translateY(-2px);box-shadow:0 3px 5px rgba(0,0,0,0.2);}
+  .menu-button.active{background:#0a84ff;border-color:#0a84ff;}
+  .menu-button.action{background:#2a6b2a;border-color:#2a6b2a;}
+  .menu-button.action:hover{background:#3c8c3c;}
+  
+  /* Filter and control elements */
+  header input, header select, .panel select, .panel input{
+    background:#303030;color:#fff;border:1px solid #555;padding:6px 8px;border-radius:4px;}
+  .export-button{color:#fff;text-decoration:none;padding:6px 10px;
+    background:#303030;border:1px solid #555;border-radius:4px;transition:all 0.2s ease;}
+  .export-button:hover{background:#404040;}
+  
+  /* Panel containers */
+  .panel{padding:15px;display:none;}
+  .panel-title{margin-top:0;margin-bottom:15px;font-size:1.4em;color:#0a84ff;}
+  
+  /* Metrics and stats visualization */
+  #metrics-panel{display:flex;flex-wrap:wrap;gap:20px;}
+  .metric{padding:15px;background:#202020;border-radius:8px;min-width:150px;
+    display:flex;flex-direction:column;align-items:center;text-align:center;}
+  .metric-value{font-size:2em;font-weight:bold;margin:10px 0;}
+  .metric-label{font-size:0.9em;color:#aaa;}
+  
+  /* Tables */
+  table{width:100%;border-collapse:collapse;margin-top:10px;border-radius:4px;overflow:hidden;}
+  th{background:#252525;text-align:left;font-weight:bold;}
+  th,td{padding:8px 12px;border-bottom:1px solid #333;}
+  tr:hover{background:#252525;}
+  tr.allowed{background:#0b3d0b;} 
+  tr.allowed:hover{background:#0c470c;}
+  tr.denied{background:#4d0b0b;}
+  tr.denied:hover{background:#5e0d0d;}
   tr.error{background:#4d360b;}
-  button{background:#303030;color:#fff;border:1px solid #555;padding:6px 12px;cursor:pointer;margin-right:5px;}
-  button:hover{background:#404040;}
-  #config label{display:block;margin-bottom:10px;}
-  #config textarea{background:#303030;color:#fff;border:1px solid #555;}
+  tr.error:hover{background:#5e420d;}
+  
+  /* Form elements */
+  .panel label{display:block;margin-bottom:15px;}
+  .panel textarea{background:#303030;color:#fff;border:1px solid #555;
+    padding:10px;border-radius:4px;font-family:monospace;resize:vertical;}
+  .save-button{background:#2a6b2a;color:#fff;border:1px solid #1e4e1e;
+    padding:8px 15px;cursor:pointer;border-radius:4px;font-weight:bold;transition:all 0.2s ease;}
+  .save-button:hover{background:#3c8c3c;}
+  .success-message{color:#4caf50;margin-left:10px;font-weight:bold;}
 </style>
 </head>
 <body>
 <header>
-  <button onclick="showTab('logs')">Logs</button>
-  <button onclick="showTab('config')">Config</button>
-  <div id="log-controls" style="display:flex;gap:10px;align-items:center;">
+  <div class="main-menu">
+    <button onclick="showTab('logs')" class="menu-button">Audit Logs</button>
+    <button onclick="showTab('metrics-panel')" class="menu-button">Metrics</button>
+    <button onclick="showTab('basic-policy')" class="menu-button">Basic Policy</button>
+    <button onclick="showTab('contextual-policy')" class="menu-button">Contextual Policy</button>
+    <button onclick="showTab('settings')" class="menu-button">Settings</button>
+    <button onclick="reloadPolicy()" class="menu-button action">Reload Policies</button>
+  </div>
+  <div id="log-controls" style="display:flex;gap:10px;align-items:center;margin-top:10px;background:#252525;padding:8px;border-radius:6px;">
     <label>Since (ISO): <input id="since" type="text" placeholder="2025-05-07T00:00:00"></label>
     <label>Model: <input id="model" type="text"></label>
     <label>Tool:  <input id="tool"  type="text"></label>
@@ -487,42 +530,95 @@ def dash():
         <option value="">all</option><option>allowed</option><option>denied</option><option>error</option>
       </select>
     </label>
-    <button onclick="reloadPolicy()">Reload Policy</button>
-    <a id="csv-export" class="btn btn-sm btn-outline-secondary" style="color:#aaa;text-decoration:none;padding:4px 8px;border:1px solid #555;border-radius:3px;" href="/api/logs/export">Export CSV</a>
+    <a id="csv-export" class="export-button" href="/api/logs/export">Export CSV</a>
   </div>
 </header>
-<div id="metrics"></div>
-
 <!-- Logs Panel -->
-<div id="logs">
-  <table id="logtbl"><thead><tr>
-    <th>Time</th><th>Model</th><th>Tool</th><th>Status</th><th>Reason</th>
-  </tr></thead><tbody></tbody></table>
+<div id="logs" class="panel">
+  <h2 class="panel-title">Audit Logs</h2>
+  <p>View and filter all security gateway activity including tool calls, policy decisions, and errors.</p>
+  <table id="logtbl">
+    <thead>
+      <tr>
+        <th>Time</th><th>Model</th><th>Tool</th><th>Status</th><th>Reason</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 </div>
 
-<!-- Config Panel -->
-<div id="config" style="display:none;padding:10px;">
-  <h3>Gateway Settings</h3>
-  <label>Log level:
-    <select id="cfg_log_level">
-      <option>debug</option><option selected>info</option>
-      <option>warning</option><option>error</option>
-    </select>
-  </label>
-  <label>Max log rows in memory:
-    <input id="cfg_max_hist" type="number" min="100" step="100">
-  </label>
-  <label>Auto‑refresh ms:
-    <input id="cfg_auto" type="number" step="500">
-  </label>
-  <h3>Basic Policy (policies.yaml)</h3>
-  <textarea id="policy_editor" style="width:100%;height:250px;font-family:monospace;"></textarea>
+<!-- Metrics Panel -->
+<div id="metrics-panel" class="panel">
+  <h2 class="panel-title">Security Metrics</h2>
+  <p>Real-time dashboard of security gateway activity and policy enforcement.</p>
   
-  <h3>Contextual Policy (contextual_policy.yaml)</h3>
-  <textarea id="contextual_policy_editor" style="width:100%;height:250px;font-family:monospace;"></textarea>
+  <div class="metrics-container">
+    <div class="metric">
+      <div class="metric-label">Total Requests</div>
+      <div id="metric-total" class="metric-value">0</div>
+    </div>
+    
+    <div class="metric">
+      <div class="metric-label">Allowed</div>
+      <div id="metric-allows" class="metric-value">0</div>
+    </div>
+    
+    <div class="metric">
+      <div class="metric-label">Denied</div>
+      <div id="metric-denies" class="metric-value">0</div>
+    </div>
+    
+    <div class="metric">
+      <div class="metric-label">Error Rate</div>
+      <div id="metric-error-rate" class="metric-value">0%</div>
+    </div>
+  </div>
+</div>
+
+<!-- Basic Policy Panel -->
+<div id="basic-policy" class="panel">
+  <h2 class="panel-title">Basic Policy Configuration</h2>
+  <p>Configure the core policies that control which models can access which tools.</p>
   
-  <br><button onclick="saveConfig()">Save & Reload</button>
-  <span id="save_msg"></span>
+  <textarea id="policy_editor" style="width:100%;height:400px;"></textarea>
+  <button onclick="savePolicy('basic')" class="save-button">Save & Reload</button>
+  <span id="basic_save_msg" class="success-message"></span>
+</div>
+
+<!-- Contextual Policy Panel -->
+<div id="contextual-policy" class="panel">
+  <h2 class="panel-title">Contextual Policy Configuration</h2>
+  <p>Configure advanced policies that evaluate the full session context, including prompts and tool call history.</p>
+  
+  <textarea id="contextual_policy_editor" style="width:100%;height:400px;"></textarea>
+  <button onclick="savePolicy('contextual')" class="save-button">Save & Reload</button>
+  <span id="contextual_save_msg" class="success-message"></span>
+</div>
+
+<!-- Settings Panel -->
+<div id="settings" class="panel">
+  <h2 class="panel-title">Gateway Settings</h2>
+  <p>Configure global settings for the security gateway operation.</p>
+  
+  <div class="settings-grid">
+    <label>Log level:
+      <select id="cfg_log_level">
+        <option>debug</option><option selected>info</option>
+        <option>warning</option><option>error</option>
+      </select>
+    </label>
+    
+    <label>Max log rows in memory:
+      <input id="cfg_max_hist" type="number" min="100" step="100">
+    </label>
+    
+    <label>Auto-refresh interval (ms):
+      <input id="cfg_auto" type="number" step="500">
+    </label>
+  </div>
+  
+  <button onclick="saveSettings()" class="save-button">Save Settings</button>
+  <span id="settings_save_msg" class="success-message"></span>
 </div>
 
 <script>
@@ -551,87 +647,209 @@ let currentTab = "logs";
 function qs(id){return document.getElementById(id)}
 
 function showTab(t){
+  // Update current tab
   currentTab = t;
-  qs("logs").style.display = t === "logs" ? "block" : "none";
-  qs("config").style.display = t === "config" ? "block" : "none";
-  qs("log-controls").style.display = t === "logs" ? "flex" : "none";
-  qs("metrics").style.display = t === "logs" ? "flex" : "none";
+  
+  // Hide all panels
+  document.querySelectorAll('.panel').forEach(panel => {
+    panel.style.display = 'none';
+  });
+  
+  // Remove active class from all menu buttons
+  document.querySelectorAll('.menu-button').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  
+  // Show selected panel
+  if (t === 'logs') {
+    qs('logs').style.display = 'block';
+    qs('log-controls').style.display = 'flex';
+    document.querySelector('.menu-button:nth-child(1)').classList.add('active');
+  } else if (t === 'metrics-panel') {
+    qs('metrics-panel').style.display = 'block';
+    updateMetricsDisplay();
+    document.querySelector('.menu-button:nth-child(2)').classList.add('active');
+  } else if (t === 'basic-policy') {
+    qs('basic-policy').style.display = 'block';
+    document.querySelector('.menu-button:nth-child(3)').classList.add('active');
+  } else if (t === 'contextual-policy') {
+    qs('contextual-policy').style.display = 'block';
+    document.querySelector('.menu-button:nth-child(4)').classList.add('active');
+  } else if (t === 'settings') {
+    qs('settings').style.display = 'block';
+    document.querySelector('.menu-button:nth-child(5)').classList.add('active');
+  }
 }
 
 async function loadConfig(){
   const cfg = await fetchJSON("/api/config");
-  qs("cfg_log_level").value = cfg.log_level;
-  qs("cfg_max_hist").value = cfg.max_hist;
-  qs("cfg_auto").value = cfg.auto_refresh_ms;
-  qs("policy_editor").value = cfg.policy_yaml;
-  qs("contextual_policy_editor").value = cfg.contextual_policy_yaml;
+  // Settings panel
+  qs("cfg_log_level").value = cfg.log_level || "info";
+  qs("cfg_max_hist").value = cfg.max_hist || 500;
+  qs("cfg_auto").value = cfg.auto_refresh_ms || 2000;
+  
+  // Policy panels
+  qs("policy_editor").value = cfg.policy_yaml || "";
+  qs("contextual_policy_editor").value = cfg.contextual_policy_yaml || "";
 }
 
-async function saveConfig(){
+function updateMetricsDisplay() {
+  // Only update if we're on the metrics tab
+  if (currentTab !== 'metrics-panel') return;
+  
+  fetchJSON("/api/metrics").then(m => {
+    qs("metric-total").textContent = m.total || 0;
+    qs("metric-allows").textContent = m.allows || 0;
+    qs("metric-denies").textContent = m.denies || 0;
+    
+    // Calculate error rate
+    const errorRate = m.total > 0 ? Math.round((m.errors || 0) * 100 / m.total) : 0;
+    qs("metric-error-rate").textContent = errorRate + "%";
+  });
+}
+
+async function savePolicy(policyType) {
+  const saveMsg = qs(policyType + "_save_msg");
+  const body = {};
+  
+  if (policyType === 'basic') {
+    body.policy_yaml = qs("policy_editor").value;
+  } else if (policyType === 'contextual') {
+    body.contextual_policy_yaml = qs("contextual_policy_editor").value;
+  }
+  
+  try {
+    const res = await fetch("/api/config", {
+      method: "POST",
+      headers: {...headers, "Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+    
+    if (res.ok) {
+      // Reload policies
+      await fetch("/api/policy/reload", {method: "POST", headers});
+      saveMsg.textContent = "Saved and reloaded ✅";
+      setTimeout(() => saveMsg.textContent = "", 2000);
+    } else {
+      saveMsg.textContent = "Error: " + (await res.text());
+      setTimeout(() => saveMsg.textContent = "", 5000);
+    }
+  } catch (e) {
+    saveMsg.textContent = "Error: " + e.message;
+    setTimeout(() => saveMsg.textContent = "", 5000);
+  }
+}
+
+async function saveSettings() {
+  const saveMsg = qs("settings_save_msg");
   const body = {
     log_level: qs("cfg_log_level").value,
     max_hist: parseInt(qs("cfg_max_hist").value),
-    auto_refresh_ms: parseInt(qs("cfg_auto").value),
-    policy_yaml: qs("policy_editor").value,
-    contextual_policy_yaml: qs("contextual_policy_editor").value
+    auto_refresh_ms: parseInt(qs("cfg_auto").value)
   };
-  const res = await fetch("/api/config",{
-    method: "POST",
-    headers: {...headers, "Content-Type": "application/json"},
-    body: JSON.stringify(body)
-  });
-  if(res.ok){ 
-    qs("save_msg").innerText = "Saved ✔"; 
-    setTimeout(() => qs("save_msg").innerText = "", 2000); 
-  } else { 
-    alert("Save failed"); 
+  
+  try {
+    const res = await fetch("/api/config", {
+      method: "POST",
+      headers: {...headers, "Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+    
+    if (res.ok) {
+      saveMsg.textContent = "Settings saved ✅";
+      setTimeout(() => saveMsg.textContent = "", 2000);
+    } else {
+      saveMsg.textContent = "Error: " + (await res.text());
+      setTimeout(() => saveMsg.textContent = "", 5000);
+    }
+  } catch (e) {
+    saveMsg.textContent = "Error: " + e.message;
+    setTimeout(() => saveMsg.textContent = "", 5000);
   }
 }
 
 async function fetchJSON(url){
-  const res = await fetch(url,{headers}); if(!res.ok) return [];
+  const res = await fetch(url, {headers}); 
+  if(!res.ok) return {};
   return res.json();
 }
 
-async function loadMetrics(){
-  const m=await fetchJSON("/api/metrics");
-  qs("metrics").innerHTML=
-    `<div class=metric>Total ${m.total}</div>`+
-    `<div class=metric>Allows ${m.allows}</div>`+
-    `<div class=metric>Denies ${m.denies}</div>`;
+async function updateMetricsDisplay() {
+  // Only update if we're on the metrics tab
+  if (currentTab !== 'metrics-panel') return;
+  
+  try {
+    const m = await fetchJSON("/api/metrics");
+    qs("metric-total").textContent = m.total || 0;
+    qs("metric-allows").textContent = m.allows || 0;
+    qs("metric-denies").textContent = m.denies || 0;
+    
+    // Calculate error rate
+    const errorRate = m.total > 0 ? Math.round((m.errors || 0) * 100 / m.total) : 0;
+    qs("metric-error-rate").textContent = errorRate + "%";
+  } catch (e) {
+    console.error("Error updating metrics:", e);
+  }
 }
 
 async function loadLogs(){
   if (currentTab !== "logs") return;
-  const p=new URLSearchParams();
-  ["since","model","tool","status"].forEach(k=>{const v=qs(k).value;if(v)p.set(k,v)});
-  const logs=await fetchJSON("/api/logs?"+p.toString());
-  const tb=qs("logtbl").querySelector("tbody");
-  tb.innerHTML=logs.map(l=>`
-    <tr class="${l.status}">
-      <td>${l.timestamp}</td><td>${l.model_id}</td>
-      <td>${l.tool}</td><td>${l.status}</td><td>${l.reason||""}</td>
-    </tr>`).join("");
+  
+  try {
+    const p = new URLSearchParams();
+    ["since","model","tool","status"].forEach(k => {
+      const v = qs(k).value;
+      if(v) p.set(k,v);
+    });
+    
+    const logs = await fetchJSON("/api/logs?" + p.toString());
+    const tb = qs("logtbl").querySelector("tbody");
+    
+    if (logs && Array.isArray(logs) && logs.length > 0) {
+      tb.innerHTML = logs.map(l => `
+        <tr class="${l.status || 'unknown'}">
+          <td>${l.timestamp || ''}</td>
+          <td>${l.model_id || ''}</td>
+          <td>${l.tool || ''}</td>
+          <td>${l.status || ''}</td>
+          <td>${l.reason || ''}</td>
+        </tr>`).join("");
+    } else {
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;">No logs match the current filter criteria</td></tr>';
+    }
+  } catch (e) {
+    console.error("Error loading logs:", e);
+  }
 }
 
 function reloadPolicy(){
-  fetch("/api/policy/reload",{method:"POST",headers}).then(()=>alert("Policy reloaded"));
+  fetch("/api/policy/reload", {
+    method: "POST", 
+    headers
+  }).then(res => {
+    if (res.ok) {
+      alert("Policies successfully reloaded");
+    } else {
+      alert("Error reloading policies: " + res.statusText);
+    }
+  }).catch(e => {
+    alert("Error reloading policies: " + e.message);
+  });
 }
 
-// Load configuration on first load
+// Initialize app
 loadConfig();
+showTab('logs');
+loadLogs();
 
-// Start polling for logs/metrics
+// Start polling for updates
 setInterval(() => {
   if (currentTab === "logs") {
     loadLogs();
-    loadMetrics();
+  } else if (currentTab === "metrics-panel") {
+    updateMetricsDisplay();
   }
 }, parseInt(qs("cfg_auto") ? qs("cfg_auto").value : 2000));
-
-// Initial load
-loadLogs();
-loadMetrics();
 </script>
 </body>
 </html>"""
