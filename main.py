@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Constants
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "changeme")
+ADMIN_KEY = os.environ.get("ADMIN_KEY")
 
 # Get a logger for this module
 logger = logging.getLogger(__name__)
@@ -77,13 +77,17 @@ if os.environ.get("ENABLE_DEMO_DATA", "false").lower() == "true":
 def require_api_key(view_function):
     @functools.wraps(view_function)
     def decorated_function(*args, **kwargs):
-        # Check for API key in header
-        api_key = request.headers.get("X-Admin-Key")
+        # Check for API key in header or query param
+        api_key = request.headers.get("X-Admin-Key") 
+        if not api_key and request.args.get("api_key"):
+            api_key = request.args.get("api_key")
         
         if not api_key:
+            logger.warning("Missing API key in request")
             return abort(401)
         
         if api_key != ADMIN_KEY:
+            logger.warning(f"Invalid API key provided: {api_key[:3]}...")
             return abort(401)
         
         # Continue to the view
@@ -93,6 +97,23 @@ def require_api_key(view_function):
 @app.route("/healthz")
 def health():
     return {"status": "ok"}
+
+@app.route("/dashkey")
+def dashboard_key():
+    """Simple dashboard to test authentication"""
+    admin_key = os.environ.get("ADMIN_KEY")
+    return f"""
+    <html>
+    <head><title>Dashboard API Key Test</title></head>
+    <body>
+        <h1>Dashboard API Key Test</h1>
+        <p>Your ADMIN_KEY environment variable is set to: {admin_key[:3]}*** (first 3 characters shown)</p>
+        <p>Try visiting the <a href="/dash">dashboard</a> using this key.</p>
+        <p>To access the <a href="/api/metrics">API metrics endpoint</a> with a curl request:</p>
+        <pre>curl -H "X-Admin-Key: {admin_key}" https://your-site.example.com/api/metrics</pre>
+    </body>
+    </html>
+    """
 
 @app.route("/")
 def root():
@@ -413,7 +434,7 @@ def api_save_config():
             os.environ[k] = str(data[k.lower()])
     return {"status": "saved"}
 
-@app.route("/dash")
+@app.route("/dash", methods=["GET"])
 @require_api_key
 def dash():
     return """<!doctype html>
@@ -486,7 +507,24 @@ def dash():
 <script>
 const apiKey = prompt("Admin API key:", "");
 const headers = {"X-Admin-Key": apiKey};
-document.getElementById("csv-export").href = `/api/logs/export?api_key=${encodeURIComponent(apiKey)}`;
+// Update CSV export URL with proper header
+document.getElementById("csv-export").href = `/api/logs/export`;
+document.getElementById("csv-export").onclick = function(e) {
+  e.preventDefault();
+  fetch('/api/logs/export', {
+    headers: headers
+  })
+  .then(response => response.blob())
+  .then(blob => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'audit.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+};
 
 let currentTab = "logs";
 function qs(id){return document.getElementById(id)}
