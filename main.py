@@ -72,6 +72,12 @@ def dashboard():
     """Simple dashboard to display the most recent logs"""
     return render_template("dashboard.html")
 
+# Test interface endpoint
+@app.route("/test")
+def test_interface():
+    """Test interface for sending requests to the API"""
+    return render_template("test.html")
+
 # Reload policies endpoint
 @app.route("/reload", methods=["POST"])
 def reload():
