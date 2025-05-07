@@ -514,8 +514,6 @@ def api_logs_export():
         "Content-Type": "text/csv",
         "Content-Disposition": "attachment; filename=audit.csv",
     }
-    
-    return response
 
 @app.route("/dash")
 @require_api_key
