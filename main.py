@@ -393,6 +393,13 @@ def api_policy():
 def api_policy_reload():
     policy_engine.reload_policies()
     return {"status": "reloaded"}
+    
+@app.route("/api/schema/reload", methods=["POST"])
+@require_api_key
+def api_schema_reload():
+    from schema_validator import reload_schemas
+    reload_schemas()
+    return {"status": "reloaded"}
 
 @app.route("/api/logs/export")
 @require_api_key

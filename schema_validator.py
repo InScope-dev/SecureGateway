@@ -6,7 +6,6 @@ import os
 import json
 import logging
 import jsonschema
-from jsonschema import ValidationError
 from typing import Dict, Any, Union, Optional
 
 # Setup logging
@@ -108,7 +107,7 @@ def validate_output(tool_name: str, payload: Dict[str, Any]) -> None:
     try:
         jsonschema.validate(instance=payload, schema=schema)
     
-    except ValidationError as e:
+    except jsonschema.ValidationError as e:
         error_path = '.'.join(str(p) for p in e.path)
         message = f"Output validation failed at {error_path}: {e.message}"
         logger.warning(message)
