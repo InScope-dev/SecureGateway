@@ -118,7 +118,11 @@ def dashboard_key():
 @app.route("/")
 def root():
     """Root endpoint with navigation menu"""
-    return render_template_string("""<!DOCTYPE html>
+    # Get admin key for direct dashboard access
+    admin_key = os.environ.get("ADMIN_KEY", "")
+    dashboard_link = f"/dash?api_key={admin_key}" if admin_key else "/dash"
+    
+    template = """<!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
@@ -140,7 +144,7 @@ def root():
                             <div class="card-body text-center">
                                 <h5 class="card-title">Dashboard</h5>
                                 <p class="card-text">Monitor MCP traffic with detailed logs and risk analysis</p>
-                                <a href="/dash" class="btn btn-primary">View Dashboard</a>
+                                <a href="{{ dashboard_link }}" class="btn btn-primary">View Dashboard</a>
                             </div>
                         </div>
                     </div>
@@ -186,7 +190,9 @@ def root():
         </div>
     </div>
 </body>
-</html>""")
+</html>"""
+    
+    return render_template_string(template, dashboard_link=dashboard_link)
 
 @app.route("/logs")
 def logs():
@@ -452,63 +458,110 @@ def api_save_config():
     return {"status": "saved"}
 
 @app.route("/dash", methods=["GET"])
-@require_api_key
 def dash():
-    return """<!doctype html>
+    """Dashboard with API key prompt and management UI"""
+    # If API key is provided in the query param, we'll use it in the JavaScript
+    api_key = request.args.get("api_key", "")
+    dashboard_template = """<!doctype html>
 <html>
 <head>
-<title>MCP‑Sec Dashboard</title>
+<title>MCP-Sec Dashboard</title>
+<link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
 <style>
-  body{font-family:Arial,sans-serif;margin:0;padding:0;background:#121212;color:#eee;}
+  body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #121212; color: #eee; }
   
   /* Header and menu styles */
-  header{padding:15px;background:#202020;}
-  .main-menu{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
-  .menu-button{background:#303030;color:#fff;border:1px solid #555;padding:8px 15px;
-    cursor:pointer;border-radius:4px;font-weight:bold;min-width:100px;transition:all 0.2s ease;}
-  .menu-button:hover{background:#404040;transform:translateY(-2px);box-shadow:0 3px 5px rgba(0,0,0,0.2);}
-  .menu-button.active{background:#0a84ff;border-color:#0a84ff;}
-  .menu-button.action{background:#2a6b2a;border-color:#2a6b2a;}
-  .menu-button.action:hover{background:#3c8c3c;}
+  header { padding: 15px; background: #202020; }
+  .main-menu { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .menu-button { 
+    background: #303030; 
+    color: #fff; 
+    border: 1px solid #555; 
+    padding: 8px 15px;
+    cursor: pointer; 
+    border-radius: 4px; 
+    font-weight: bold; 
+    min-width: 100px; 
+    transition: all 0.2s ease;
+  }
+  .menu-button:hover { background: #404040; transform: translateY(-2px); box-shadow: 0 3px 5px rgba(0,0,0,0.2); }
+  .menu-button.active { background: #0a84ff; border-color: #0a84ff; }
+  .menu-button.action { background: #2a6b2a; border-color: #2a6b2a; }
+  .menu-button.action:hover { background: #3c8c3c; }
   
   /* Filter and control elements */
-  header input, header select, .panel select, .panel input{
-    background:#303030;color:#fff;border:1px solid #555;padding:6px 8px;border-radius:4px;}
-  .export-button{color:#fff;text-decoration:none;padding:6px 10px;
-    background:#303030;border:1px solid #555;border-radius:4px;transition:all 0.2s ease;}
-  .export-button:hover{background:#404040;}
+  header input, header select, .panel select, .panel input {
+    background: #303030; 
+    color: #fff; 
+    border: 1px solid #555; 
+    padding: 6px 8px; 
+    border-radius: 4px;
+  }
+  .export-button {
+    color: #fff; 
+    text-decoration: none; 
+    padding: 6px 10px;
+    background: #303030; 
+    border: 1px solid #555; 
+    border-radius: 4px; 
+    transition: all 0.2s ease;
+  }
+  .export-button:hover { background: #404040; }
   
   /* Panel containers */
-  .panel{padding:15px;display:none;}
-  .panel-title{margin-top:0;margin-bottom:15px;font-size:1.4em;color:#0a84ff;}
+  .panel { padding: 15px; display: none; }
+  .panel-title { margin-top: 0; margin-bottom: 15px; font-size: 1.4em; color: #0a84ff; }
   
   /* Metrics and stats visualization */
-  #metrics-panel{display:flex;flex-wrap:wrap;gap:20px;}
-  .metric{padding:15px;background:#202020;border-radius:8px;min-width:150px;
-    display:flex;flex-direction:column;align-items:center;text-align:center;}
-  .metric-value{font-size:2em;font-weight:bold;margin:10px 0;}
-  .metric-label{font-size:0.9em;color:#aaa;}
+  #metrics-panel { display: flex; flex-wrap: wrap; gap: 20px; }
+  .metric {
+    padding: 15px; 
+    background: #202020; 
+    border-radius: 8px; 
+    min-width: 150px;
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    text-align: center;
+  }
+  .metric-value { font-size: 2em; font-weight: bold; margin: 10px 0; }
+  .metric-label { font-size: 0.9em; color: #aaa; }
   
   /* Tables */
-  table{width:100%;border-collapse:collapse;margin-top:10px;border-radius:4px;overflow:hidden;}
-  th{background:#252525;text-align:left;font-weight:bold;}
-  th,td{padding:8px 12px;border-bottom:1px solid #333;}
-  tr:hover{background:#252525;}
-  tr.allowed{background:#0b3d0b;} 
-  tr.allowed:hover{background:#0c470c;}
-  tr.denied{background:#4d0b0b;}
-  tr.denied:hover{background:#5e0d0d;}
-  tr.error{background:#4d360b;}
-  tr.error:hover{background:#5e420d;}
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; border-radius: 4px; overflow: hidden; }
+  th { background: #252525; text-align: left; font-weight: bold; }
+  th,td { padding: 8px 12px; border-bottom: 1px solid #333; }
+  tr:hover { background: #252525; }
+  tr.allowed { background: #0b3d0b; } 
+  tr.allowed:hover { background: #0c470c; }
+  tr.denied { background: #4d0b0b; }
+  tr.denied:hover { background: #5e0d0d; }
+  tr.error { background: #4d360b; }
+  tr.error:hover { background: #5e420d; }
   
   /* Form elements */
-  .panel label{display:block;margin-bottom:15px;}
-  .panel textarea{background:#303030;color:#fff;border:1px solid #555;
-    padding:10px;border-radius:4px;font-family:monospace;resize:vertical;}
-  .save-button{background:#2a6b2a;color:#fff;border:1px solid #1e4e1e;
-    padding:8px 15px;cursor:pointer;border-radius:4px;font-weight:bold;transition:all 0.2s ease;}
-  .save-button:hover{background:#3c8c3c;}
-  .success-message{color:#4caf50;margin-left:10px;font-weight:bold;}
+  .panel label { display: block; margin-bottom: 15px; }
+  .panel textarea {
+    background: #303030; 
+    color: #fff; 
+    border: 1px solid #555;
+    padding: 10px; 
+    border-radius: 4px; 
+    font-family: monospace; 
+    resize: vertical;
+  }
+  .save-button {
+    background: #2a6b2a; 
+    color: #fff; 
+    border: 1px solid #1e4e1e;
+    padding: 8px 15px; 
+    cursor: pointer; 
+    border-radius: 4px; 
+    font-weight: bold; 
+    transition: all 0.2s ease;
+  }
+  .save-button:hover { background: #3c8c3c; }
+  .success-message { color: #4caf50; margin-left: 10px; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -622,7 +675,8 @@ def dash():
 </div>
 
 <script>
-const apiKey = prompt("Admin API key:", "");
+// Check for API key in URL or prompt for it
+const apiKey = (new URLSearchParams(window.location.search).get('api_key')) || prompt("Admin API key:", "");
 const headers = {"X-Admin-Key": apiKey};
 // Update CSV export URL with proper header
 document.getElementById("csv-export").href = `/api/logs/export`;
