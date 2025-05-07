@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "search.web Output Schema",
+  "type": "object",
+  "required": ["results", "query"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The search results"
+    },
+    "query": {
+      "type": "string",
+      "description": "The search query that was executed"
+    }
+  }
+}

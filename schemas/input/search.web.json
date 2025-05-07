@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "search.web Input Schema",
+  "type": "object",
+  "required": ["q"],
+  "properties": {
+    "q": {
+      "type": "string",
+      "description": "The search query"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "calendar.create_event Output Schema",
+  "type": "object",
+  "required": ["status", "event_id"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"],
+      "description": "The status of the calendar event creation"
+    },
+    "event_id": {
+      "type": "string",
+      "description": "The ID of the created calendar event"
+    },
+    "start_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The confirmed start time of the event"
+    }
+  }
+}
