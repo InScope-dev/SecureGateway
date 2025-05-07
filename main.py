@@ -1,121 +1,41 @@
-#!/usr/bin/env python3
 """
 MCP-Sec Gateway - Zero Trust Security Layer for Model Context Protocol
 Main entry point for the Flask application
 """
 import os
+import time
+import json
 import logging
-from flask import Flask, jsonify, render_template, send_from_directory
-from dotenv import load_dotenv
+from flask import Flask, request, jsonify, render_template_string
+from audit_logger import LOG_HISTORY
 
-from audit_logger import get_recent_logs
-from policy_engine import reload_policies
-from models import db, AuditLog
+# Configure logging
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Load environment variables
-load_dotenv()
+app = Flask(__name__)
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Import and register the MCP routes
+from mcp_routes import mcp_bp
+app.register_blueprint(mcp_bp)
 
-# Create Flask app
-app = Flask(__name__, template_folder="templates")
+@app.route("/healthz")
+def health():
+    return {"status": "ok"}
 
-# Configure the database
-database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    # SQLAlchemy 1.4+ compatibility fix for postgres URLs
-    if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
-    
-    logger.info(f"Database URL found, connecting to database...")
-else:
-    logger.error("DATABASE_URL environment variable not found")
-    # Fall back to SQLite for development
-    database_url = "sqlite:///mcp_gateway.db"
-    logger.warning(f"Falling back to SQLite database: {database_url}")
-
-app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_recycle": 300,
-    "pool_pre_ping": True,
-}
-
-# Initialize the database with the app
-db.init_app(app)
-
-# Create database tables if they don't exist and perform migrations
-with app.app_context():
-    try:
-        # Check if we need to add the risk_level column
-        from sqlalchemy import inspect
-        inspector = inspect(db.engine)
-        has_risk_level = False
-        
-        # Get columns for the AuditLog table
-        for column in inspector.get_columns('audit_log'):
-            if column['name'] == 'risk_level':
-                has_risk_level = True
-                break
-                
-        # If risk_level column doesn't exist, add it
-        if not has_risk_level:
-            logger.info("Adding risk_level column to audit_log table...")
-            with db.engine.connect() as conn:
-                conn.execute(db.text("ALTER TABLE audit_log ADD COLUMN risk_level VARCHAR(10) DEFAULT 'low'"))
-                conn.commit()
-            logger.info("risk_level column added successfully")
-    except Exception as e:
-        logger.error(f"Error during database migration: {e}")
-        
-    # Create tables that don't exist
-    db.create_all()
-    logger.info("Database tables created if they didn't exist")
-
-# Ensure templates directory exists
-os.makedirs("templates", exist_ok=True)
-
-# Root endpoint
 @app.route("/")
 def root():
     """Root endpoint to check if the service is running"""
     return "MCP-Sec Gateway OK"
 
-# Get logs endpoint
 @app.route("/logs")
 def logs():
-    """Return the most recent log entries"""
-    return jsonify({"logs": get_recent_logs(100)})
+    return jsonify(LOG_HISTORY[-100:])
 
-# Dashboard endpoint
 @app.route("/dash")
-def dashboard():
-    """Simple dashboard to display the most recent logs"""
-    return render_template("dashboard.html")
-
-# Test interface endpoint
-@app.route("/test")
-def test_interface():
-    """Test interface for sending requests to the API"""
-    return render_template("test.html")
-
-# Reload policies endpoint
-@app.route("/reload", methods=["POST"])
-def reload():
-    """Reload the policies from the yaml file"""
-    try:
-        reload_policies()
-        return jsonify({"status": "success", "message": "Policies reloaded successfully"})
-    except Exception as e:
-        logger.error(f"Failed to reload policies: {e}")
-        return jsonify({"status": "error", "message": f"Failed to reload policies: {str(e)}"})
-
-# Create templates directory and dashboard.html if they don't exist
-os.makedirs("templates", exist_ok=True)
-with open("templates/dashboard.html", "w") as f:
-    f.write("""<!DOCTYPE html>
+def dash():
+    return render_template_string(
+        """<!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
@@ -123,6 +43,11 @@ with open("templates/dashboard.html", "w") as f:
     <title>MCP-Sec Gateway Dashboard</title>
     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+        .risk-high { background-color: #dc3545; color: white; }
+        .risk-medium { background-color: #ffc107; color: black; }
+        .risk-low { background-color: #198754; color: white; }
+    </style>
 </head>
 <body>
     <div class="container mt-4">
@@ -149,8 +74,7 @@ with open("templates/dashboard.html", "w") as f:
                                         <th>Tool</th>
                                         <th>Status</th>
                                         <th>Risk Level</th>
-                                        <th>Latency (ms)</th>
-                                        <th>Actions</th>
+                                        <th>Details</th>
                                     </tr>
                                 </thead>
                                 <tbody id="logsTable">
@@ -191,37 +115,34 @@ with open("templates/dashboard.html", "w") as f:
                     const logsTable = document.getElementById('logsTable');
                     logsTable.innerHTML = '';
 
-                    data.logs.forEach((log, index) => {
+                    data.forEach((log, index) => {
                         const tr = document.createElement('tr');
                         
-                        // Apply different row styling based on risk level
-                        if (log.risk_level === 'high') {
+                        // Apply row styling based on risk level or status
+                        let riskLevel = log.risk_level || 'low';
+                        let statusClass = log.status === 'denied' ? 'table-danger' : 
+                                         (log.status === 'allowed' ? 'table-success' : '');
+                        
+                        if (riskLevel === 'high') {
                             tr.classList.add('table-danger');
-                        } else if (log.risk_level === 'medium') {
+                        } else if (riskLevel === 'medium') {
                             tr.classList.add('table-warning');
-                        } else if (log.status === 'allowed') {
-                            tr.classList.add('table-success');
+                        } else if (statusClass) {
+                            tr.classList.add(statusClass);
                         }
 
-                        // Format timestamp to local time
-                        const timestamp = new Date(log.timestamp).toLocaleString();
-                        
-                        // Get color for risk level badge
-                        let riskBadgeClass = 'bg-success';
-                        if (log.risk_level === 'medium') {
-                            riskBadgeClass = 'bg-warning text-dark';
-                        } else if (log.risk_level === 'high') {
-                            riskBadgeClass = 'bg-danger';
-                        }
+                        // Format timestamp to local time if it exists
+                        const timestamp = log.timestamp ? 
+                            new Date(log.timestamp).toLocaleString() : 
+                            new Date().toLocaleString();
                         
                         tr.innerHTML = `
                             <td>${timestamp}</td>
                             <td>${log.model_id || '-'}</td>
                             <td>${log.session_id || '-'}</td>
                             <td>${log.tool || '-'}</td>
-                            <td><span class="badge ${log.status === 'allowed' ? 'bg-success' : 'bg-danger'}">${log.status}</span></td>
-                            <td><span class="badge ${riskBadgeClass}">${log.risk_level || 'low'}</span></td>
-                            <td>${log.latency_ms !== undefined ? log.latency_ms : '-'}</td>
+                            <td><span class="badge ${log.status === 'allowed' ? 'bg-success' : 'bg-danger'}">${log.status || '-'}</span></td>
+                            <td><span class="badge risk-${riskLevel}">${riskLevel}</span></td>
                             <td>
                                 <button class="btn btn-sm btn-outline-info view-details" data-index="${index}">
                                     Details
@@ -235,7 +156,7 @@ with open("templates/dashboard.html", "w") as f:
                     document.querySelectorAll('.view-details').forEach(button => {
                         button.addEventListener('click', function() {
                             const index = this.getAttribute('data-index');
-                            const logData = data.logs[index];
+                            const logData = data[index];
                             document.getElementById('logDetailContent').textContent = JSON.stringify(logData, null, 2);
                             document.getElementById('logDetailModalLabel').textContent = `Log Detail: ${logData.tool || 'Unknown'}`;
                             
@@ -256,18 +177,13 @@ with open("templates/dashboard.html", "w") as f:
         // Refresh button
         document.getElementById('refreshBtn').addEventListener('click', fetchLogs);
 
-        // Auto-refresh every 30 seconds
-        setInterval(fetchLogs, 30000);
+        // Auto-refresh every 15 seconds
+        setInterval(fetchLogs, 15000);
     </script>
 </body>
 </html>
-""")
-
-# Import mcp routes after Flask app is created to avoid circular imports
-from mcp_routes import register_mcp_routes
-register_mcp_routes(app)
+"""
+    )
 
 if __name__ == "__main__":
-    # Get port from environment variable or use default
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.getenv('PORT', 5000)), debug=False)
