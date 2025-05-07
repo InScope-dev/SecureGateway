@@ -1,0 +1,23 @@
+# Contextual Policy Rules
+# These rules are evaluated after basic policy checks
+# They can block tool calls based on session context
+
+- when_tool: "db.write_sensitive"
+  block_if_prompt_contains:
+    - "internal"
+    - "exfiltrate"
+    - "steal"
+    - "bypass"
+    - "hack"
+  block_if_previous_denials: 1
+  require_prior_successful_tool: "search.query"
+
+- when_tool: "calendar.create_event"
+  require_prior_successful_tool: "search.query"
+  
+- when_tool: "file.write"
+  block_if_prompt_contains:
+    - "malware"
+    - "virus"
+    - "exploit"
+  block_if_previous_denials: 2

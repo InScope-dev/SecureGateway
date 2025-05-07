@@ -1,0 +1,152 @@
+#1: Contextual Policy Engine Layer
+🧩 Goal
+Extend policy_engine.py with a new function:
+
+python
+Copy
+Edit
+def check_policy_contextual(model_id, tool_name, session_id, context)
+This evaluates session-aware rules, including:
+
+Prompt content
+
+Prior denials
+
+Tool usage sequence
+
+Custom YAML-defined logic (contextual_policy.yaml)
+
+❗This runs after check_policy_basic() passes. Both must return allowed=True to proceed.
+
+🔧 Edit policy_engine.py
+Add this new function:
+
+python
+Copy
+Edit
+import re, yaml
+
+def check_policy_contextual(model_id, tool_name, session_id, context):
+    rules = load_contextual_policies()
+    prompt = context.get("prompt", "")
+    calls = context.get("tool_calls", [])
+
+    for rule in rules:
+        if rule.get("when_tool") and not re.fullmatch(rule["when_tool"], tool_name):
+            continue
+
+        # Block if prompt contains any forbidden phrases
+        for phrase in rule.get("block_if_prompt_contains", []):
+            if phrase.lower() in prompt.lower():
+                return {"allowed": False, "reason": f"Prompt contains blocked phrase: '{phrase}'"}
+
+        # Block if N or more previous denials in session
+        if "block_if_previous_denials" in rule:
+            denials = sum(1 for c in calls if c.get("status") == "denied")
+            if denials >= rule["block_if_previous_denials"]:
+                return {"allowed": False, "reason": "Too many prior denials in session"}
+
+        # Block if required prior tool not used successfully
+        if "require_prior_successful_tool" in rule:
+            found = any(c["tool"] == rule["require_prior_successful_tool"] and c["status"] == "allowed" for c in calls)
+            if not found:
+                return {"allowed": False, "reason": f"Missing required prior tool: {rule['require_prior_successful_tool']}"}
+
+    return {"allowed": True}
+Helper to load contextual policy:
+
+python
+Copy
+Edit
+def load_contextual_policies(path="contextual_policy.yaml"):
+    try:
+        with open(path) as f:
+            return yaml.safe_load(f) or []
+    except Exception:
+        return []
+📁 Create contextual_policy.yaml
+Add this file at the root:
+
+yaml
+Copy
+Edit
+- when_tool: "db.write_sensitive"
+  block_if_prompt_contains:
+    - "internal"
+    - "exfiltrate"
+  block_if_previous_denials: 1
+  require_prior_successful_tool: "search.query"
+
+- when_tool: "calendar.create_event"
+  require_prior_successful_tool: "search.query"
+✅ Call This in mcp_routes.py
+In your /mcp/toolcall route:
+
+python
+Copy
+Edit
+context = SESSION_STATE.get(session_id, {})
+decision = check_policy_basic(...)
+if decision["allowed"]:
+    decision = check_policy_contextual(model_id, tool_name, session_id, context)
+📦 Prompt #2: Session Tracker Module
+🧠 Goal
+Track each session’s full reasoning loop:
+Prompt → ToolCalls → ToolResults
+Use this to pass context into the contextual policy engine.
+
+🔧 Create session_tracker.py
+python
+Copy
+Edit
+import time
+
+SESSION_STATE = {}
+
+def init_session(session_id, model_id, prompt=""):
+    SESSION_STATE[session_id] = {
+        "model_id": model_id,
+        "prompt": prompt,
+        "tool_calls": [],
+        "start_time": time.time()
+    }
+
+def update_tool_call(session_id, tool_name, input_data, status, output=None):
+    if session_id not in SESSION_STATE:
+        return
+    SESSION_STATE[session_id]["tool_calls"].append({
+        "tool": tool_name,
+        "input": input_data,
+        "output": output,
+        "status": status,
+        "timestamp": time.time()
+    })
+
+def get_context(session_id):
+    return SESSION_STATE.get(session_id, {})
+✅ In mcp_routes.py:
+At the start of a /mcp/prompt or /toolcall, call:
+
+python
+Copy
+Edit
+from session_tracker import init_session, update_tool_call, get_context
+
+# Example:
+context = get_context(session_id)
+decision = check_policy_basic(...)
+if decision["allowed"]:
+    decision = check_policy_contextual(model_id, tool_name, session_id, context)
+After executing tool:
+
+python
+Copy
+Edit
+update_tool_call(session_id, tool_name, input_payload, decision["status"], response.get("result"))
+✅ Now You Support Both:
+Layer	Description
+🔁 check_policy_basic()	Fast, per-call filters: tool allow/deny, time, schema
+🧠 check_policy_contextual()	Session-aware logic: prompt, escalation, history
+🧾 session_tracker.py	Keeps memory of each reasoning loop
+📘 contextual_policy.yaml	Stores advanced rules
+
