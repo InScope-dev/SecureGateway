@@ -502,6 +502,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
 
@@ -517,6 +518,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.4" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "sqlalchemy", specifier = ">=2.0.40" },
     { name = "uvicorn", specifier = ">=0.34.2" },
 ]
 

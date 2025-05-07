@@ -6,9 +6,14 @@ Main entry point for the Flask application
 import os
 import logging
 from flask import Flask, jsonify, render_template, send_from_directory
+from dotenv import load_dotenv
 
 from audit_logger import get_recent_logs
 from policy_engine import reload_policies
+from models import db, AuditLog
+
+# Load environment variables
+load_dotenv()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +21,35 @@ logger = logging.getLogger(__name__)
 
 # Create Flask app
 app = Flask(__name__, template_folder="templates")
+
+# Configure the database
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    # SQLAlchemy 1.4+ compatibility fix for postgres URLs
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    
+    logger.info(f"Database URL found, connecting to database...")
+else:
+    logger.error("DATABASE_URL environment variable not found")
+    # Fall back to SQLite for development
+    database_url = "sqlite:///mcp_gateway.db"
+    logger.warning(f"Falling back to SQLite database: {database_url}")
+
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_recycle": 300,
+    "pool_pre_ping": True,
+}
+
+# Initialize the database with the app
+db.init_app(app)
+
+# Create database tables if they don't exist
+with app.app_context():
+    db.create_all()
+    logger.info("Database tables created if they didn't exist")
 
 # Ensure templates directory exists
 os.makedirs("templates", exist_ok=True)

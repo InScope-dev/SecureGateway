@@ -1,6 +1,6 @@
 """
 MCP-Sec Audit Logger
-Logs all activity in JSON-lines format
+Logs all activity in JSON-lines format and in the database
 """
 import os
 import json
@@ -8,11 +8,12 @@ import time
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from flask import current_app
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
-# In-memory log history (most recent entries)
+# In-memory log history (fallback for when DB is not available)
 LOG_HISTORY = []
 MAX_HISTORY = 1000
 
@@ -21,7 +22,7 @@ LOG_FILE = "audit.log"
 
 def log_event(event: Dict[str, Any]) -> None:
     """
-    Log an event to the audit log
+    Log an event to the audit log (both file and database)
     
     Args:
         event: Dictionary containing event details
@@ -42,14 +43,39 @@ def log_event(event: Dict[str, Any]) -> None:
         with open(LOG_FILE, "a") as f:
             f.write(json.dumps(event) + "\n")
     except Exception as e:
-        logger.error(f"Failed to write to audit log: {str(e)}")
+        logger.error(f"Failed to write to audit log file: {str(e)}")
     
     # Also log to console for visibility
     logger.info(f"AUDIT: {json.dumps(event)}")
+    
+    # Store in database if app context is available
+    try:
+        if current_app:
+            from models import db, AuditLog
+            with current_app.app_context():
+                # Create a new AuditLog entry
+                log_entry = AuditLog(
+                    timestamp=datetime.strptime(event["timestamp"], "%Y-%m-%dT%H:%M:%SZ") if "timestamp" in event else datetime.utcnow(),
+                    model_id=event.get("model_id", ""),
+                    session_id=event.get("session_id", ""),
+                    tool=event.get("tool", ""),
+                    status=event.get("status", ""),
+                    reason=event.get("reason"),
+                    latency_ms=event.get("latency_ms"),
+                    input_data=event.get("input"),
+                    output_data=event.get("output")
+                )
+                
+                db.session.add(log_entry)
+                db.session.commit()
+                
+                logger.debug(f"Audit log entry saved to database with ID: {log_entry.id}")
+    except Exception as e:
+        logger.error(f"Failed to save audit log to database: {str(e)}")
 
 def get_recent_logs(count: int = 100) -> List[Dict[str, Any]]:
     """
-    Get the most recent log entries
+    Get the most recent log entries from the database
     
     Args:
         count: Maximum number of entries to return
@@ -57,6 +83,18 @@ def get_recent_logs(count: int = 100) -> List[Dict[str, Any]]:
     Returns:
         List of log entries, most recent first
     """
+    try:
+        if current_app:
+            from models import AuditLog
+            with current_app.app_context():
+                logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(count).all()
+                return [log.to_dict() for log in logs]
+    except Exception as e:
+        logger.error(f"Failed to retrieve logs from database: {str(e)}")
+        # Fall back to in-memory logs
+        logger.warning("Falling back to in-memory logs")
+    
+    # If database retrieval failed or no app context, use in-memory logs
     return list(reversed(LOG_HISTORY[-count:]))
 
 def get_logs_by_session(session_id: str, count: int = 100) -> List[Dict[str, Any]]:
@@ -70,6 +108,16 @@ def get_logs_by_session(session_id: str, count: int = 100) -> List[Dict[str, Any
     Returns:
         List of log entries for the session, most recent first
     """
+    try:
+        if current_app:
+            from models import AuditLog
+            with current_app.app_context():
+                logs = AuditLog.query.filter_by(session_id=session_id).order_by(AuditLog.timestamp.desc()).limit(count).all()
+                return [log.to_dict() for log in logs]
+    except Exception as e:
+        logger.error(f"Failed to retrieve session logs from database: {str(e)}")
+    
+    # Fall back to in-memory logs
     session_logs = [log for log in LOG_HISTORY if log.get("session_id") == session_id]
     return list(reversed(session_logs[-count:]))
 
@@ -84,6 +132,16 @@ def get_logs_by_model(model_id: str, count: int = 100) -> List[Dict[str, Any]]:
     Returns:
         List of log entries for the model, most recent first
     """
+    try:
+        if current_app:
+            from models import AuditLog
+            with current_app.app_context():
+                logs = AuditLog.query.filter_by(model_id=model_id).order_by(AuditLog.timestamp.desc()).limit(count).all()
+                return [log.to_dict() for log in logs]
+    except Exception as e:
+        logger.error(f"Failed to retrieve model logs from database: {str(e)}")
+    
+    # Fall back to in-memory logs
     model_logs = [log for log in LOG_HISTORY if log.get("model_id") == model_id]
     return list(reversed(model_logs[-count:]))
 
