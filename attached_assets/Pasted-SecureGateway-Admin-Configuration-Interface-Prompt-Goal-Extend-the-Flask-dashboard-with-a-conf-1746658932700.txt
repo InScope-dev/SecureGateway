@@ -1,0 +1,153 @@
+SecureGateway – Admin Configuration Interface Prompt
+🧩 Goal
+Extend the Flask dashboard with a /config page that lets an authenticated admin:
+
+View & edit policies.yaml in a YAML text‑area.
+
+Save → hot‑reload the new rules (calls /api/policy/reload).
+
+Toggle basic runtime settings in memory:
+
+LOG_LEVEL (info, debug, warning)
+
+MAX_HIST (max log rows in memory)
+
+AUTO_REFRESH_MS (dash polling interval)
+
+Download / upload JSON‑Schema files (nice‑to‑have).
+
+All POST actions protected by the same X‑Admin-Key header.
+
+1️⃣ Server‑side endpoints (Flask)
+Add to main.py (below existing APIs):
+
+python
+Copy
+Edit
+from pathlib import Path
+
+@app.get("/api/config")
+@require_api_key
+def api_get_config():
+    return {
+        "log_level": os.getenv("LOG_LEVEL", "info"),
+        "max_hist": int(os.getenv("MAX_HIST", 500)),
+        "auto_refresh_ms": int(os.getenv("AUTO_REFRESH_MS", 2000)),
+        "policy_yaml": Path(os.getenv("POLICY_PATH", "policies.yaml")).read_text(),
+    }
+
+@app.post("/api/config")
+@require_api_key
+def api_save_config():
+    data = request.json or {}
+    # 1. Update policy
+    if "policy_yaml" in data:
+        Path(os.getenv("POLICY_PATH", "policies.yaml")).write_text(data["policy_yaml"])
+        reload_policies()
+    # 2. Update runtime env vars (non‑persistent in Replit)
+    for k in ("LOG_LEVEL", "MAX_HIST", "AUTO_REFRESH_MS"):
+        if k.lower() in data:
+            os.environ[k] = str(data[k.lower()])
+    return {"status": "saved"}
+2️⃣ Client‑side Admin Page
+Insert into DASH_HTML (right after <header> block) – a new Config tab:
+
+html
+Copy
+Edit
+<button onclick="showTab('logs')">Logs</button>
+<button onclick="showTab('config')">Config</button>
+Add hidden div for config form:
+
+html
+Copy
+Edit
+<div id="config" style="display:none;padding:10px;">
+  <h3>Gateway Settings</h3>
+  <label>Log level:
+    <select id="cfg_log_level">
+      <option>debug</option><option selected>info</option>
+      <option>warning</option><option>error</option>
+    </select>
+  </label>
+  <label>Max log rows in memory:
+    <input id="cfg_max_hist" type="number" min="100" step="100">
+  </label>
+  <label>Auto‑refresh ms:
+    <input id="cfg_auto" type="number" step="500">
+  </label>
+  <h3>Policies.yaml</h3>
+  <textarea id="policy_editor" style="width:100%;height:300px;font-family:monospace;"></textarea>
+  <br><button onclick="saveConfig()">Save & Reload</button>
+  <span id="save_msg"></span>
+</div>
+Add JS helpers inside <script>:
+
+js
+Copy
+Edit
+let currentTab="logs";
+function showTab(t){
+  currentTab=t;
+  document.getElementById("logtbl").parentElement.style.display= t==="logs"?"block":"none";
+  document.getElementById("config").style.display= t==="config"?"block":"none";
+}
+
+async function loadConfig(){
+  const cfg=await fetchJSON("/api/config");
+  qs("cfg_log_level").value = cfg.log_level;
+  qs("cfg_max_hist").value = cfg.max_hist;
+  qs("cfg_auto").value     = cfg.auto_refresh_ms;
+  qs("policy_editor").value = cfg.policy_yaml;
+}
+
+async function saveConfig(){
+  const body = {
+    log_level: qs("cfg_log_level").value,
+    max_hist:  qs("cfg_max_hist").value,
+    auto_refresh_ms: qs("cfg_auto").value,
+    policy_yaml: qs("policy_editor").value
+  };
+  const res = await fetch("/api/config",{method:"POST",headers:{...headers,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(res.ok){ qs("save_msg").innerText="Saved ✔"; setTimeout(()=>qs("save_msg").innerText="",2000); }
+  else{ alert("Save failed"); }
+}
+Call loadConfig() once after the admin key prompt:
+
+js
+Copy
+Edit
+loadConfig();
+3️⃣ Security
+Re‑use require_api_key.
+
+Reject requests lacking X‑Admin-Key.
+
+Keep the admin key in Replit Secrets.
+
+4️⃣ README Snippet
+Append:
+
+markdown
+Copy
+Edit
+### Admin Config UI
+* Navigate to `/dash` → **Config** tab
+* Edit `policies.yaml` inline, tweak log level or polling speed.
+* Click **Save & Reload** – changes take effect instantly (policy reload).
+* All actions require the `X-Admin-Key` header; keep your key secret.
+✅ Test checklist
+Open /dash → Config tab appears.
+
+Editing policies.yaml and clicking Save shows “Saved ✔”.
+
+New rule takes effect (curl a ToolCall that was previously denied/allowed).
+
+Changing LOG_LEVEL to debug prints verbose logs to the Replit console.
+
+Dashboard auto‑refresh interval respects new AUTO_REFRESH_MS.
+
+Any /api/config call without the key returns 401.
+
+Commit as “feat: Admin config interface (edit policies & runtime settings)”.
+

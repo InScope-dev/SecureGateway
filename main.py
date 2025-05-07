@@ -315,6 +315,8 @@ def test():
 </body>
 </html>""")
 
+from pathlib import Path
+
 # --- JSON API ---
 @app.route("/api/logs")
 @require_api_key
@@ -387,6 +389,30 @@ def api_logs_export():
         "Content-Disposition": "attachment; filename=audit.csv",
     }
 
+@app.route("/api/config")
+@require_api_key
+def api_get_config():
+    return {
+        "log_level": os.getenv("LOG_LEVEL", "info"),
+        "max_hist": int(os.getenv("MAX_HIST", 500)),
+        "auto_refresh_ms": int(os.getenv("AUTO_REFRESH_MS", 2000)),
+        "policy_yaml": Path(os.getenv("POLICY_PATH", "policies.yaml")).read_text(),
+    }
+
+@app.route("/api/config", methods=["POST"])
+@require_api_key
+def api_save_config():
+    data = request.json or {}
+    # 1. Update policy
+    if "policy_yaml" in data:
+        Path(os.getenv("POLICY_PATH", "policies.yaml")).write_text(data["policy_yaml"])
+        policy_engine.reload_policies()
+    # 2. Update runtime env vars (non-persistent in Replit)
+    for k in ("LOG_LEVEL", "MAX_HIST", "AUTO_REFRESH_MS"):
+        if k.lower() in data:
+            os.environ[k] = str(data[k.lower()])
+    return {"status": "saved"}
+
 @app.route("/dash")
 @require_api_key
 def dash():
@@ -397,39 +423,115 @@ def dash():
 <style>
   body{font-family:Arial;margin:0;padding:0;background:#121212;color:#eee;}
   header{padding:10px;background:#202020;display:flex;gap:20px;align-items:center;}
-  header input,header select{background:#303030;color:#fff;border:1px solid #555;padding:4px;}
+  header input,header select,#config select,#config input{background:#303030;color:#fff;border:1px solid #555;padding:4px;}
   #metrics{display:flex;gap:20px;margin:10px;}
   .metric{padding:10px;background:#202020;border-radius:6px;}
   table{width:100%;border-collapse:collapse;margin-top:10px;}
   th,td{padding:6px 8px;border-bottom:1px solid #333;}
   tr.allowed{background:#0b3d0b;} tr.denied{background:#4d0b0b;}
   tr.error{background:#4d360b;}
+  button{background:#303030;color:#fff;border:1px solid #555;padding:6px 12px;cursor:pointer;margin-right:5px;}
+  button:hover{background:#404040;}
+  #config label{display:block;margin-bottom:10px;}
+  #config textarea{background:#303030;color:#fff;border:1px solid #555;}
 </style>
 </head>
 <body>
 <header>
-  <label>Since (ISO): <input id="since" type="text" placeholder="2025-05-07T00:00:00"></label>
-  <label>Model: <input id="model" type="text"></label>
-  <label>Tool:  <input id="tool"  type="text"></label>
-  <label>Status:
-    <select id="status">
-      <option value="">all</option><option>allowed</option><option>denied</option><option>error</option>
-    </select>
-  </label>
-  <button onclick="reloadPolicy()">Reload Policy</button>
+  <button onclick="showTab('logs')">Logs</button>
+  <button onclick="showTab('config')">Config</button>
+  <div id="log-controls" style="display:flex;gap:10px;align-items:center;">
+    <label>Since (ISO): <input id="since" type="text" placeholder="2025-05-07T00:00:00"></label>
+    <label>Model: <input id="model" type="text"></label>
+    <label>Tool:  <input id="tool"  type="text"></label>
+    <label>Status:
+      <select id="status">
+        <option value="">all</option><option>allowed</option><option>denied</option><option>error</option>
+      </select>
+    </label>
+    <button onclick="reloadPolicy()">Reload Policy</button>
+    <a id="csv-export" class="btn btn-sm btn-outline-secondary" style="color:#aaa;text-decoration:none;padding:4px 8px;border:1px solid #555;border-radius:3px;" href="/api/logs/export">Export CSV</a>
+  </div>
 </header>
 <div id="metrics"></div>
-<table id="logtbl"><thead><tr>
-  <th>Time</th><th>Model</th><th>Tool</th><th>Status</th><th>Reason</th>
-</tr></thead><tbody></tbody></table>
+
+<!-- Logs Panel -->
+<div id="logs">
+  <table id="logtbl"><thead><tr>
+    <th>Time</th><th>Model</th><th>Tool</th><th>Status</th><th>Reason</th>
+  </tr></thead><tbody></tbody></table>
+</div>
+
+<!-- Config Panel -->
+<div id="config" style="display:none;padding:10px;">
+  <h3>Gateway Settings</h3>
+  <label>Log level:
+    <select id="cfg_log_level">
+      <option>debug</option><option selected>info</option>
+      <option>warning</option><option>error</option>
+    </select>
+  </label>
+  <label>Max log rows in memory:
+    <input id="cfg_max_hist" type="number" min="100" step="100">
+  </label>
+  <label>Auto‑refresh ms:
+    <input id="cfg_auto" type="number" step="500">
+  </label>
+  <h3>Policies.yaml</h3>
+  <textarea id="policy_editor" style="width:100%;height:300px;font-family:monospace;"></textarea>
+  <br><button onclick="saveConfig()">Save & Reload</button>
+  <span id="save_msg"></span>
+</div>
+
 <script>
 const apiKey = prompt("Admin API key:", "");
 const headers = {"X-Admin-Key": apiKey};
+document.getElementById("csv-export").href = `/api/logs/export?api_key=${encodeURIComponent(apiKey)}`;
+
+let currentTab = "logs";
 function qs(id){return document.getElementById(id)}
+
+function showTab(t){
+  currentTab = t;
+  qs("logs").style.display = t === "logs" ? "block" : "none";
+  qs("config").style.display = t === "config" ? "block" : "none";
+  qs("log-controls").style.display = t === "logs" ? "flex" : "none";
+  qs("metrics").style.display = t === "logs" ? "flex" : "none";
+}
+
+async function loadConfig(){
+  const cfg = await fetchJSON("/api/config");
+  qs("cfg_log_level").value = cfg.log_level;
+  qs("cfg_max_hist").value = cfg.max_hist;
+  qs("cfg_auto").value = cfg.auto_refresh_ms;
+  qs("policy_editor").value = cfg.policy_yaml;
+}
+
+async function saveConfig(){
+  const body = {
+    log_level: qs("cfg_log_level").value,
+    max_hist: parseInt(qs("cfg_max_hist").value),
+    auto_refresh_ms: parseInt(qs("cfg_auto").value),
+    policy_yaml: qs("policy_editor").value
+  };
+  const res = await fetch("/api/config",{
+    method: "POST",
+    headers: {...headers, "Content-Type": "application/json"},
+    body: JSON.stringify(body)
+  });
+  if(res.ok){ 
+    qs("save_msg").innerText = "Saved ✔"; 
+    setTimeout(() => qs("save_msg").innerText = "", 2000); 
+  } else { 
+    alert("Save failed"); 
+  }
+}
+
 async function fetchJSON(url){
   const res = await fetch(url,{headers}); if(!res.ok) return [];
   return res.json();
 }
+
 async function loadMetrics(){
   const m=await fetchJSON("/api/metrics");
   qs("metrics").innerHTML=
@@ -437,7 +539,9 @@ async function loadMetrics(){
     `<div class=metric>Allows ${m.allows}</div>`+
     `<div class=metric>Denies ${m.denies}</div>`;
 }
+
 async function loadLogs(){
+  if (currentTab !== "logs") return;
   const p=new URLSearchParams();
   ["since","model","tool","status"].forEach(k=>{const v=qs(k).value;if(v)p.set(k,v)});
   const logs=await fetchJSON("/api/logs?"+p.toString());
@@ -448,11 +552,25 @@ async function loadLogs(){
       <td>${l.tool}</td><td>${l.status}</td><td>${l.reason||""}</td>
     </tr>`).join("");
 }
+
 function reloadPolicy(){
   fetch("/api/policy/reload",{method:"POST",headers}).then(()=>alert("Policy reloaded"));
 }
-setInterval(()=>{loadLogs();loadMetrics()},2000);
-loadLogs();loadMetrics();
+
+// Load configuration on first load
+loadConfig();
+
+// Start polling for logs/metrics
+setInterval(() => {
+  if (currentTab === "logs") {
+    loadLogs();
+    loadMetrics();
+  }
+}, parseInt(qs("cfg_auto") ? qs("cfg_auto").value : 2000));
+
+// Initial load
+loadLogs();
+loadMetrics();
 </script>
 </body>
 </html>"""
