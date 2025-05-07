@@ -713,25 +713,57 @@ def api_save_config():
             
     return {"status": "saved"}
 
-@app.route("/dash", methods=["GET"])
+@app.route("/dash")
 def dash():
-    """Dashboard with API key prompt and management UI"""
-    # If API key is provided in the query param, we'll use it in the JavaScript
+    """Simple working dashboard with minimal JavaScript"""
     api_key = request.args.get("api_key", "")
     
-    # Create a simplified dashboard template
-    html = """<!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
+    # Get recent logs
+    logs = []
+    try:
+        with open("audit.log", "r") as f:
+            logs = [json.loads(line) for line in f.readlines()]
+            logs = logs[-20:]  # Get most recent 20 logs
+            logs.reverse()  # Show newest first
+    except:
+        pass
+    
+    # Get metrics
+    total_requests = len(logs)
+    allowed = len([log for log in logs if log.get("status") == "allowed"])
+    denied = len([log for log in logs if log.get("status") == "denied"])
+    errors = len([log for log in logs if log.get("status") == "error"])
+    
+    # Format logs for display
+    formatted_logs = []
+    for log in logs:
+        formatted_logs.append({
+            "timestamp": log.get("timestamp", ""),
+            "model_id": log.get("model_id", ""),
+            "tool": log.get("tool", ""),
+            "status": log.get("status", ""),
+            "reason": log.get("reason", "")
+        })
+    
+    # Simple render_template replacement
+    return f"""<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MCP-Sec Dashboard</title>
     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    <style>
+        .status-allowed {{ background-color: rgba(40, 167, 69, 0.2); }}
+        .status-denied {{ background-color: rgba(220, 53, 69, 0.2); }}
+        .status-error {{ background-color: rgba(255, 193, 7, 0.2); }}
+        pre {{ background: #222; padding: 10px; border-radius: 4px; overflow: auto; }}
+    </style>
 </head>
 <body>
-    <div class="container py-4">
-        <header class="pb-3 mb-4 border-bottom d-flex justify-content-between">
-            <h1 class="fs-4">MCP-Sec Gateway Dashboard</h1>
+    <div class="container-fluid p-4">
+        <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center">
+            <h1 class="h3">MCP-Sec Gateway Dashboard</h1>
             <div>
                 <a href="/" class="btn btn-sm btn-outline-secondary me-2">Home</a>
                 <a href="/test" class="btn btn-sm btn-outline-secondary">Test Interface</a>
@@ -739,119 +771,120 @@ def dash():
         </header>
 
         <div class="row mb-4">
-            <div class="col-md-3">
-                <div class="list-group">
-                    <a href="#logs" class="list-group-item list-group-item-action active">Audit Logs</a>
-                    <a href="#metrics" class="list-group-item list-group-item-action">Metrics</a>
-                    <a href="#policies" class="list-group-item list-group-item-action">Policies</a>
-                    <a href="#settings" class="list-group-item list-group-item-action">Settings</a>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-primary bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Total Requests</h6>
+                        <h2 class="card-title">{total_requests}</h2>
+                    </div>
                 </div>
-                
-                <div class="mt-4">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Quick Actions</h5>
-                            <div class="d-grid gap-2">
-                                <button id="reload-policy-btn" class="btn btn-success btn-sm">Reload Policies</button>
-                                <button id="reload-schema-btn" class="btn btn-info btn-sm">Reload Schemas</button>
-                            </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-success bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Allowed</h6>
+                        <h2 class="card-title">{allowed}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-danger bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Denied</h6>
+                        <h2 class="card-title">{denied}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-warning bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Errors</h6>
+                        <h2 class="card-title">{errors}</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent Audit Logs</h5>
+                        <div>
+                            <a href="/api/logs/export" class="btn btn-sm btn-outline-secondary">Export CSV</a>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Model</th>
+                                        <th>Tool</th>
+                                        <th>Status</th>
+                                        <th>Reason</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {"".join([f'''
+                                    <tr class="status-{log['status']}">
+                                        <td>{log['timestamp']}</td>
+                                        <td>{log['model_id']}</td>
+                                        <td>{log['tool']}</td>
+                                        <td>{log['status']}</td>
+                                        <td>{log['reason'] or ''}</td>
+                                    </tr>
+                                    ''' for log in formatted_logs]) if formatted_logs else '<tr><td colspan="5" class="text-center py-3">No audit logs found</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Policy Management</h5>
+                        <form method="POST" action="/api/policy/reload">
+                            <button type="submit" class="btn btn-sm btn-success">Reload Policies</button>
+                        </form>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <p class="mb-0">Policy configuration is available via the API:</p>
+                            <ul class="mb-0">
+                                <li>View policies: <code>/api/policy</code></li>
+                                <li>Reload policies: <code>/api/policy/reload</code> (POST)</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
             </div>
             
-            <div class="col-md-9">
-                <div class="tab-content">
-                    <div id="logs" class="tab-pane fade show active">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="card-title mb-0">Audit Logs</h5>
-                            </div>
-                            <div class="card-body">
-                                <p>The full dashboard is currently under maintenance.</p>
-                                <p>Please use the <a href="/test">Test Interface</a> to interact with the MCP gateway.</p>
-                                <div class="alert alert-info">
-                                    You can access the API directly:
-                                    <ul>
-                                        <li><code>/api/logs</code> - Get filtered logs</li>
-                                        <li><code>/api/metrics</code> - View metrics</li>
-                                        <li><code>/api/policy</code> - View security policies</li>
-                                    </ul>
-                                </div>
-                            </div>
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Schema Management</h5>
+                        <form method="POST" action="/api/schema/reload">
+                            <button type="submit" class="btn btn-sm btn-success">Reload Schemas</button>
+                        </form>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <p class="mb-0">Schema validation ensures all API requests meet required formats.</p>
+                            <p class="mb-0 mt-2">Reload schemas after making changes to schema definitions.</p>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Store API key from query params or prompt
-        const apiKey = "API_KEY_PLACEHOLDER" || prompt("Enter admin API key:");
-        const headers = {"X-Admin-Key": apiKey};
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            // Setup tab switching
-            document.querySelectorAll('.list-group-item').forEach(item => {
-                item.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    
-                    // Update active tab in sidebar
-                    document.querySelectorAll('.list-group-item').forEach(i => {
-                        i.classList.remove('active');
-                    });
-                    this.classList.add('active');
-                    
-                    // Update content panes
-                    const target = this.getAttribute('href').substring(1);
-                    document.querySelectorAll('.tab-pane').forEach(pane => {
-                        pane.classList.remove('show', 'active');
-                    });
-                    
-                    const targetPane = document.getElementById(target);
-                    if (targetPane) {
-                        targetPane.classList.add('show', 'active');
-                    }
-                });
-            });
-            
-            // Reload policy button
-            document.getElementById('reload-policy-btn').addEventListener('click', function() {
-                fetch('/api/policy/reload', {
-                    method: 'POST',
-                    headers: headers
-                })
-                .then(response => response.json())
-                .then(data => {
-                    alert(data.status === 'reloaded' ? 'Policies reloaded successfully' : 'Error reloading policies');
-                })
-                .catch(error => {
-                    alert('Error: ' + error);
-                });
-            });
-            
-            // Reload schema button
-            document.getElementById('reload-schema-btn').addEventListener('click', function() {
-                fetch('/api/schema/reload', {
-                    method: 'POST',
-                    headers: headers
-                })
-                .then(response => response.json())
-                .then(data => {
-                    alert(data.status === 'reloaded' ? 'Schemas reloaded successfully' : 'Error reloading schemas');
-                })
-                .catch(error => {
-                    alert('Error: ' + error);
-                });
-            });
-        });
-    </script>
 </body>
 </html>"""
-    
-    return html.replace("API_KEY_PLACEHOLDER", api_key)
 
 # Register the MCP routes
 app.register_blueprint(mcp_routes.mcp_bp)
