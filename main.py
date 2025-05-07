@@ -518,8 +518,7 @@ def api_logs_export():
 @app.route("/dash")
 @require_api_key
 def dash():
-    return render_template_string(
-        """<!DOCTYPE html>
+    return """<!doctype html>
 <html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
