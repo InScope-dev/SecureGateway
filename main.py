@@ -1,70 +1,53 @@
 #!/usr/bin/env python3
 """
 MCP-Sec Gateway - Zero Trust Security Layer for Model Context Protocol
-Main entry point for the FastAPI application
+Main entry point for the Flask application
 """
 import os
 import logging
-import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-import gateway
-from policy_engine import reload_policies
+from flask import Flask, jsonify, render_template, send_from_directory
+
 from audit_logger import get_recent_logs
+from policy_engine import reload_policies
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(
-    title="MCP-Sec Gateway",
-    description="Zero Trust Security Layer for Model Context Protocol",
-    version="1.0.0",
-)
+# Create Flask app
+app = Flask(__name__, template_folder="templates")
 
-# Include the gateway router
-app.include_router(gateway.router)
-
-# Add static files and templates
-templates = Jinja2Templates(directory="templates")
-
-# Create templates directory if it doesn't exist
+# Ensure templates directory exists
 os.makedirs("templates", exist_ok=True)
 
 # Root endpoint
-@app.get("/", response_class=HTMLResponse)
-async def root():
+@app.route("/")
+def root():
     """Root endpoint to check if the service is running"""
-    return HTMLResponse("MCP-Sec Gateway OK")
+    return "MCP-Sec Gateway OK"
 
 # Get logs endpoint
-@app.get("/logs")
-async def logs():
+@app.route("/logs")
+def logs():
     """Return the most recent log entries"""
-    return {"logs": get_recent_logs(100)}
+    return jsonify({"logs": get_recent_logs(100)})
 
 # Dashboard endpoint
-@app.get("/dash", response_class=HTMLResponse)
-async def dashboard(request: Request):
+@app.route("/dash")
+def dashboard():
     """Simple dashboard to display the most recent logs"""
-    return templates.TemplateResponse(
-        "dashboard.html",
-        {"request": request}
-    )
+    return render_template("dashboard.html")
 
 # Reload policies endpoint
-@app.post("/reload")
-async def reload():
+@app.route("/reload", methods=["POST"])
+def reload():
     """Reload the policies from the yaml file"""
     try:
         reload_policies()
-        return {"status": "success", "message": "Policies reloaded successfully"}
+        return jsonify({"status": "success", "message": "Policies reloaded successfully"})
     except Exception as e:
         logger.error(f"Failed to reload policies: {e}")
-        return {"status": "error", "message": f"Failed to reload policies: {str(e)}"}
+        return jsonify({"status": "error", "message": f"Failed to reload policies: {str(e)}"})
 
 # Create templates directory and dashboard.html if they don't exist
 os.makedirs("templates", exist_ok=True)
@@ -205,7 +188,11 @@ with open("templates/dashboard.html", "w") as f:
 </html>
 """)
 
+# Import mcp routes after Flask app is created to avoid circular imports
+from mcp_routes import register_mcp_routes
+register_mcp_routes(app)
+
 if __name__ == "__main__":
     # Get port from environment variable or use default
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
