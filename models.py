@@ -3,9 +3,10 @@ MCP-Sec Gateway - Database Models
 Defines the database models for storing audit logs and related data
 """
 import json
+import os
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, Text
 
 # Initialize SQLAlchemy
 db = SQLAlchemy()
@@ -24,9 +25,10 @@ class AuditLog(db.Model):
     reason = db.Column(db.Text, nullable=True)
     latency_ms = db.Column(db.Integer, nullable=True)
     
-    # Store JSON data in PostgreSQL JSONB format
-    input_data = db.Column(JSONB, nullable=True)
-    output_data = db.Column(JSONB, nullable=True)
+    # Use JSON or Text type based on database
+    # SQLite doesn't support real JSON columns, but PostgreSQL does
+    input_data = db.Column(JSON().with_variant(Text, "sqlite"), nullable=True)
+    output_data = db.Column(JSON().with_variant(Text, "sqlite"), nullable=True)
     
     def __repr__(self):
         return f"<AuditLog {self.id}: {self.model_id}/{self.tool}>"
@@ -46,9 +48,26 @@ class AuditLog(db.Model):
         # Add optional fields if present
         if self.reason:
             result["reason"] = self.reason
+            
+        # Handle JSON data properly depending on database backend
         if self.input_data:
-            result["input"] = self.input_data
+            # For SQLite, the data might be stored as a string
+            if isinstance(self.input_data, str):
+                try:
+                    result["input"] = json.loads(self.input_data)
+                except:
+                    result["input"] = self.input_data
+            else:
+                result["input"] = self.input_data
+                
         if self.output_data:
-            result["output"] = self.output_data
+            # For SQLite, the data might be stored as a string
+            if isinstance(self.output_data, str):
+                try:
+                    result["output"] = json.loads(self.output_data)
+                except:
+                    result["output"] = self.output_data
+            else:
+                result["output"] = self.output_data
             
         return result

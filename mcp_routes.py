@@ -128,15 +128,29 @@ def register_mcp_routes(app):
             logger.error(f"Error processing tool call: {str(e)}")
             # Log the error
             try:
-                log_event({
-                    "model_id": data.get("model_id", "unknown"),
-                    "session_id": data.get("session_id", "unknown"),
-                    "tool": data.get("tool_name", "unknown"),
-                    "input": data.get("input", {}),
+                error_data = {
+                    "model_id": "unknown",
+                    "session_id": "unknown",
+                    "tool": "unknown",
+                    "input": {},
                     "status": "error",
                     "reason": f"Internal error: {str(e)}",
                     "latency_ms": int((time.time() - start_time) * 1000)
-                })
+                }
+                
+                # Try to get data from request if available
+                try:
+                    req_data = request.get_json()
+                    if req_data:
+                        error_data["model_id"] = req_data.get("model_id", "unknown")
+                        error_data["session_id"] = req_data.get("session_id", "unknown")
+                        error_data["tool"] = req_data.get("tool_name", "unknown")
+                        error_data["input"] = req_data.get("input", {})
+                except:
+                    # If we can't get JSON data, continue with defaults
+                    pass
+                    
+                log_event(error_data)
             except:
                 # If logging fails too, just continue
                 pass
@@ -224,15 +238,29 @@ def register_mcp_routes(app):
             logger.error(f"Error processing tool result: {str(e)}")
             # Log the error
             try:
-                log_event({
-                    "model_id": data.get("model_id", "unknown"),
-                    "session_id": data.get("session_id", "unknown"),
-                    "tool": data.get("tool_name", "unknown"),
-                    "output": data.get("output", {}),
+                error_data = {
+                    "model_id": "unknown",
+                    "session_id": "unknown",
+                    "tool": "unknown",
+                    "output": {},
                     "status": "error",
                     "reason": f"Internal error: {str(e)}",
                     "latency_ms": int((time.time() - start_time) * 1000)
-                })
+                }
+                
+                # Try to get data from request if available
+                try:
+                    req_data = request.get_json()
+                    if req_data:
+                        error_data["model_id"] = req_data.get("model_id", "unknown")
+                        error_data["session_id"] = req_data.get("session_id", "unknown")
+                        error_data["tool"] = req_data.get("tool_name", "unknown")
+                        error_data["output"] = req_data.get("output", {})
+                except:
+                    # If we can't get JSON data, continue with defaults
+                    pass
+                    
+                log_event(error_data)
             except:
                 # If logging fails too, just continue
                 pass
