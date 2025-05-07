@@ -5,19 +5,157 @@ Main entry point for the Flask application
 import os
 import time
 import json
+import csv
+import io
 import logging
-from flask import Flask, request, jsonify, render_template_string
+import functools
+import datetime
+import threading
+from flask import Flask, request, jsonify, render_template_string, Response, redirect, url_for, session, make_response, abort
+from werkzeug.security import check_password_hash
 from audit_logger import LOG_HISTORY
+import policy_engine
+import rate_limiter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+# Constants
+ADMIN_KEY = os.environ.get("ADMIN_KEY")
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
+
+# Create the Flask app
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(24).hex())
 
 # Import and register the MCP routes
 from mcp_routes import mcp_bp
 app.register_blueprint(mcp_bp)
+
+# Setup metrics
+metrics = {
+    "total_requests": 0,
+    "allowed_requests": 0,
+    "denied_requests": 0,
+    "error_requests": 0,
+    "high_risk_count": 0,
+    "medium_risk_count": 0,
+    "low_risk_count": 0
+}
+
+# Update metrics from log history on startup
+def update_metrics_from_history():
+    global metrics
+    for event in LOG_HISTORY:
+        metrics["total_requests"] += 1
+        status = event.get("status")
+        if status == "allowed":
+            metrics["allowed_requests"] += 1
+        elif status == "denied":
+            metrics["denied_requests"] += 1
+        elif status == "error":
+            metrics["error_requests"] += 1
+            
+        risk = event.get("risk_level", "low")
+        if risk == "high":
+            metrics["high_risk_count"] += 1
+        elif risk == "medium":
+            metrics["medium_risk_count"] += 1
+        else:
+            metrics["low_risk_count"] += 1
+
+# Run the initial metrics update
+update_metrics_from_history()
+
+# Sample data generator for testing (run in background thread)
+def generate_sample_data():
+    import random
+    import string
+    import time
+    
+    models = ["gpt-4o", "claude-3", "gemini-pro", "llama-3"]
+    sessions = [f"session-{i}" for i in range(1, 5)]
+    tools = ["calendar.create_event", "search.web", "weather.forecast", "db.write", "file.read"]
+    statuses = ["allowed", "denied", "error"]
+    risk_levels = ["low", "medium", "high"]
+    
+    while True:
+        from audit_logger import log_event
+        
+        # Generate random event
+        event = {
+            "model_id": random.choice(models),
+            "session_id": random.choice(sessions),
+            "tool": random.choice(tools),
+            "status": random.choice(statuses),
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "risk_level": random.choice(risk_levels),
+            "input": {"query": "".join(random.choices(string.ascii_letters, k=10))}
+        }
+        
+        if event["status"] == "denied":
+            event["reason"] = "Policy violation"
+            
+        # Log the event
+        log_event(event)
+        
+        # Update metrics
+        metrics["total_requests"] += 1
+        if event["status"] == "allowed":
+            metrics["allowed_requests"] += 1
+        elif event["status"] == "denied":
+            metrics["denied_requests"] += 1
+        else:
+            metrics["error_requests"] += 1
+            
+        if event["risk_level"] == "high":
+            metrics["high_risk_count"] += 1
+        elif event["risk_level"] == "medium":
+            metrics["medium_risk_count"] += 1
+        else:
+            metrics["low_risk_count"] += 1
+        
+        # Sleep for a bit
+        time.sleep(2)
+
+# Start the sample data generator in a background thread (for demo purposes)
+if os.environ.get("ENABLE_DEMO_DATA", "false").lower() == "true":
+    threading.Thread(target=generate_sample_data, daemon=True).start()
+
+# Authentication decorator
+def require_api_key(view_function):
+    @functools.wraps(view_function)
+    def decorated_function(*args, **kwargs):
+        # Check session first
+        if session.get("authenticated"):
+            return view_function(*args, **kwargs)
+        
+        # Check for API key in query params, headers or cookies
+        api_key = request.args.get("key") or request.headers.get("X-API-KEY")
+        
+        if not api_key and request.cookies.get("api_key"):
+            api_key = request.cookies.get("api_key")
+        
+        if not api_key:
+            if request.content_type and "application/json" in request.content_type:
+                return jsonify({"error": "Authentication required"}), 401
+            return redirect(url_for("login", next=request.path))
+        
+        if api_key != ADMIN_KEY:
+            if request.content_type and "application/json" in request.content_type:
+                return jsonify({"error": "Invalid API key"}), 403
+            session["auth_error"] = "Invalid API key"
+            return redirect(url_for("login", next=request.path))
+        
+        # Store authentication in session
+        session["authenticated"] = True
+        
+        # Continue to the view
+        return view_function(*args, **kwargs)
+    return decorated_function
 
 @app.route("/healthz")
 def health():
@@ -244,7 +382,169 @@ def test():
 </body>
 </html>""")
 
+# Login page
+@app.route("/login")
+def login():
+    next_url = request.args.get("next", "/")
+    error = session.pop("auth_error", None)
+    return render_template_string("""<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP-Sec Gateway - Login</title>
+    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Administrator Login</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if error %}
+                        <div class="alert alert-danger">{{ error }}</div>
+                        {% endif %}
+                        <form method="post" action="{{ url_for('login_post', next=next) }}">
+                            <div class="mb-3">
+                                <label for="api_key" class="form-label">Admin API Key</label>
+                                <input type="password" class="form-control" id="api_key" name="api_key" required>
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                                <label class="form-check-label" for="remember">Remember me</label>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Login</button>
+                            <a href="/" class="btn btn-outline-secondary ms-2">Cancel</a>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>""", error=error, next=next_url)
+
+@app.route("/login", methods=["POST"])
+def login_post():
+    next_url = request.args.get("next", "/")
+    api_key = request.form.get("api_key")
+    remember = request.form.get("remember") == "on"
+    
+    if not api_key:
+        session["auth_error"] = "API key is required"
+        return redirect(url_for("login", next=next_url))
+    
+    if api_key != ADMIN_KEY:
+        session["auth_error"] = "Invalid API key"
+        return redirect(url_for("login", next=next_url))
+    
+    # Set authentication in session
+    session["authenticated"] = True
+    
+    # If remember is checked, set a cookie
+    response = redirect(next_url)
+    if remember:
+        response.set_cookie("api_key", api_key, max_age=60*60*24*30)  # 30 days
+    
+    return response
+
+@app.route("/logout")
+def logout():
+    session.pop("authenticated", None)
+    response = redirect(url_for("root"))
+    response.delete_cookie("api_key")
+    return response
+
+# API endpoints
+@app.route("/api/logs")
+@require_api_key
+def api_logs():
+    # Get query parameters for filtering
+    model = request.args.get("model")
+    tool = request.args.get("tool")
+    status = request.args.get("status")
+    risk = request.args.get("risk")
+    limit = int(request.args.get("limit", 100))
+    
+    # Apply filters
+    filtered_logs = LOG_HISTORY.copy()
+    
+    if model:
+        filtered_logs = [log for log in filtered_logs if log.get("model_id") and model.lower() in log.get("model_id").lower()]
+    
+    if tool:
+        filtered_logs = [log for log in filtered_logs if log.get("tool") and tool.lower() in log.get("tool").lower()]
+    
+    if status:
+        filtered_logs = [log for log in filtered_logs if log.get("status") == status]
+    
+    if risk:
+        filtered_logs = [log for log in filtered_logs if log.get("risk_level") == risk]
+    
+    # Return the most recent logs up to the limit
+    return jsonify(filtered_logs[-limit:])
+
+@app.route("/api/metrics")
+@require_api_key
+def api_metrics():
+    return jsonify(metrics)
+
+@app.route("/api/policy")
+@require_api_key
+def api_policy():
+    try:
+        return jsonify(policy_engine.load_policies())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/policy/reload", methods=["POST"])
+@require_api_key
+def api_policy_reload():
+    try:
+        policy_engine.reload_policies()
+        return jsonify({"status": "success", "message": "Policy reloaded successfully"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/logs/export")
+@require_api_key
+def api_logs_export():
+    # Create CSV from LOG_HISTORY
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output, 
+        fieldnames=["timestamp", "model_id", "session_id", "tool", "status", "risk_level", "reason", "latency_ms"]
+    )
+    writer.writeheader()
+    
+    for log in LOG_HISTORY:
+        # Extract only the fields we want
+        row = {
+            "timestamp": log.get("timestamp", ""),
+            "model_id": log.get("model_id", ""),
+            "session_id": log.get("session_id", ""),
+            "tool": log.get("tool", ""),
+            "status": log.get("status", ""),
+            "risk_level": log.get("risk_level", ""),
+            "reason": log.get("reason", ""),
+            "latency_ms": log.get("latency_ms", "")
+        }
+        writer.writerow(row)
+    
+    # Create response with CSV file
+    response = Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment;filename=mcp_sec_logs.csv"}
+    )
+    
+    return response
+
 @app.route("/dash")
+@require_api_key
 def dash():
     return render_template_string(
         """<!DOCTYPE html>
@@ -259,27 +559,138 @@ def dash():
         .risk-high { background-color: #dc3545; color: white; }
         .risk-medium { background-color: #ffc107; color: black; }
         .risk-low { background-color: #198754; color: white; }
+        
+        .metric-card {
+            transition: transform 0.2s;
+        }
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .filter-controls {
+            background-color: rgba(0,0,0,0.05);
+            border-radius: 0.25rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1060;
+        }
     </style>
 </head>
 <body>
-    <div class="container mt-4">
+    <div class="container-fluid mt-4">
         <header class="mb-4 d-flex justify-content-between align-items-center">
             <div>
-                <h1 class="display-4">MCP-Sec Gateway Dashboard</h1>
+                <h1 class="display-5">MCP-Sec Gateway Dashboard</h1>
                 <p class="lead">Real-time monitoring of Model Context Protocol traffic</p>
             </div>
             <div>
                 <a href="/" class="btn btn-outline-secondary me-2">Home</a>
-                <a href="/test" class="btn btn-outline-primary">Test Interface</a>
+                <a href="/test" class="btn btn-outline-primary me-2">Test Interface</a>
+                <a href="/logout" class="btn btn-outline-danger">Logout</a>
             </div>
         </header>
 
+        <!-- Metrics Row -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-primary bg-opacity-25 h-100 metric-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Total Requests</h5>
+                        <h2 id="total-requests" class="display-4">--</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success bg-opacity-25 h-100 metric-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Allowed</h5>
+                        <h2 id="allowed-requests" class="display-4">--</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-danger bg-opacity-25 h-100 metric-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Denied</h5>
+                        <h2 id="denied-requests" class="display-4">--</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-warning bg-opacity-25 h-100 metric-card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">High Risk</h5>
+                        <h2 id="high-risk" class="display-4">--</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls Row -->
+        <div class="row mb-3">
+            <div class="col">
+                <div class="filter-controls d-flex flex-wrap gap-3 align-items-center">
+                    <div>
+                        <label for="model-filter" class="form-label mb-0">Model:</label>
+                        <select id="model-filter" class="form-select form-select-sm">
+                            <option value="">All Models</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="tool-filter" class="form-label mb-0">Tool:</label>
+                        <select id="tool-filter" class="form-select form-select-sm">
+                            <option value="">All Tools</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="status-filter" class="form-label mb-0">Status:</label>
+                        <select id="status-filter" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <option value="allowed">Allowed</option>
+                            <option value="denied">Denied</option>
+                            <option value="error">Error</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="risk-filter" class="form-label mb-0">Risk:</label>
+                        <select id="risk-filter" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 ms-auto">
+                        <button id="reload-policy-btn" class="btn btn-outline-warning btn-sm">
+                            <i class="bi bi-arrow-clockwise"></i> Reload Policy
+                        </button>
+                        <button id="export-csv-btn" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-download"></i> Export Logs
+                        </button>
+                        <button id="refreshBtn" class="btn btn-primary btn-sm">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Table -->
         <div class="row">
             <div class="col-md-12">
                 <div class="card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Recent Activity Logs</h5>
-                        <button id="refreshBtn" class="btn btn-sm btn-outline-secondary">Refresh</button>
+                        <h5 class="mb-0">Activity Logs</h5>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="auto-refresh" checked>
+                            <label class="form-check-label" for="auto-refresh">Auto-refresh</label>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive">
@@ -322,17 +733,113 @@ def dash():
                 </div>
             </div>
         </div>
+        
+        <!-- Toast container for notifications -->
+        <div class="toast-container">
+            <div id="notification-toast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="toast-header">
+                    <strong class="me-auto" id="toast-title">Notification</strong>
+                    <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+                <div class="toast-body" id="toast-body">
+                    This is a notification message.
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
-        // Function to fetch and display logs
-        function fetchLogs() {
-            fetch('/logs')
+        // Global state
+        let logData = [];
+        let autoRefreshEnabled = true;
+        let autoRefreshInterval;
+        let models = new Set();
+        let tools = new Set();
+        
+        // Show notification toast
+        function showNotification(title, message, type = 'success') {
+            const toast = document.getElementById('notification-toast');
+            const toastTitle = document.getElementById('toast-title');
+            const toastBody = document.getElementById('toast-body');
+            
+            // Set content
+            toastTitle.textContent = title;
+            toastBody.textContent = message;
+            
+            // Set appearance based on type
+            toast.classList.remove('bg-success', 'bg-danger', 'bg-warning', 'text-white');
+            if (type === 'success') {
+                toast.classList.add('bg-success', 'text-white');
+            } else if (type === 'error') {
+                toast.classList.add('bg-danger', 'text-white');
+            } else if (type === 'warning') {
+                toast.classList.add('bg-warning');
+            }
+            
+            // Show the toast
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+        
+        // Fetch and update metrics
+        function updateMetrics() {
+            fetch('/api/metrics' + getQueryString())
                 .then(response => response.json())
                 .then(data => {
+                    document.getElementById('total-requests').textContent = data.total_requests;
+                    document.getElementById('allowed-requests').textContent = data.allowed_requests;
+                    document.getElementById('denied-requests').textContent = data.denied_requests;
+                    document.getElementById('high-risk').textContent = data.high_risk_count;
+                })
+                .catch(error => {
+                    console.error('Error fetching metrics:', error);
+                });
+        }
+        
+        // Get query string from filters
+        function getQueryString() {
+            const model = document.getElementById('model-filter').value;
+            const tool = document.getElementById('tool-filter').value;
+            const status = document.getElementById('status-filter').value;
+            const risk = document.getElementById('risk-filter').value;
+            
+            let params = new URLSearchParams();
+            if (model) params.append('model', model);
+            if (tool) params.append('tool', tool);
+            if (status) params.append('status', status);
+            if (risk) params.append('risk', risk);
+            
+            return params.toString() ? '?' + params.toString() : '';
+        }
+        
+        // Function to fetch and display logs with filters
+        function fetchLogs() {
+            fetch('/api/logs' + getQueryString())
+                .then(response => response.json())
+                .then(data => {
+                    logData = data; // Store for detail view
                     const logsTable = document.getElementById('logsTable');
                     logsTable.innerHTML = '';
+                    
+                    // Collect model and tool names
+                    data.forEach(log => {
+                        if (log.model_id) models.add(log.model_id);
+                        if (log.tool) tools.add(log.tool);
+                    });
+                    
+                    // Update filter dropdowns if they're empty
+                    const modelFilter = document.getElementById('model-filter');
+                    const toolFilter = document.getElementById('tool-filter');
+                    
+                    if (modelFilter.options.length <= 1) {
+                        updateFilterOptions(modelFilter, models);
+                    }
+                    
+                    if (toolFilter.options.length <= 1) {
+                        updateFilterOptions(toolFilter, tools);
+                    }
 
+                    // Populate table
                     data.forEach((log, index) => {
                         const tr = document.createElement('tr');
                         
@@ -359,7 +866,7 @@ def dash():
                             <td>${log.model_id || '-'}</td>
                             <td>${log.session_id || '-'}</td>
                             <td>${log.tool || '-'}</td>
-                            <td><span class="badge ${log.status === 'allowed' ? 'bg-success' : 'bg-danger'}">${log.status || '-'}</span></td>
+                            <td><span class="badge ${log.status === 'allowed' ? 'bg-success' : (log.status === 'denied' ? 'bg-danger' : 'bg-warning')}">${log.status || '-'}</span></td>
                             <td><span class="badge risk-${riskLevel}">${riskLevel}</span></td>
                             <td>
                                 <button class="btn btn-sm btn-outline-info view-details" data-index="${index}">
@@ -374,29 +881,118 @@ def dash():
                     document.querySelectorAll('.view-details').forEach(button => {
                         button.addEventListener('click', function() {
                             const index = this.getAttribute('data-index');
-                            const logData = data[index];
-                            document.getElementById('logDetailContent').textContent = JSON.stringify(logData, null, 2);
-                            document.getElementById('logDetailModalLabel').textContent = `Log Detail: ${logData.tool || 'Unknown'}`;
-                            
-                            // Show the modal
-                            const modal = new bootstrap.Modal(document.getElementById('logDetailModal'));
-                            modal.show();
+                            showLogDetail(index);
                         });
                     });
                 })
                 .catch(error => {
                     console.error('Error fetching logs:', error);
                 });
+                
+            // Also update metrics
+            updateMetrics();
         }
-
+        
+        // Update filter dropdown options
+        function updateFilterOptions(selectElement, values) {
+            // Save current selection
+            const currentValue = selectElement.value;
+            
+            // Clear options except the first one
+            while (selectElement.options.length > 1) {
+                selectElement.remove(1);
+            }
+            
+            // Add new options
+            Array.from(values).sort().forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                selectElement.appendChild(option);
+            });
+            
+            // Restore selection if it still exists
+            if (currentValue && Array.from(values).includes(currentValue)) {
+                selectElement.value = currentValue;
+            }
+        }
+        
+        // Show log detail in modal
+        function showLogDetail(index) {
+            const logData = window.logData[index];
+            document.getElementById('logDetailContent').textContent = JSON.stringify(logData, null, 2);
+            document.getElementById('logDetailModalLabel').textContent = `Log Detail: ${logData.tool || 'Unknown'}`;
+            
+            // Show the modal
+            const modal = new bootstrap.Modal(document.getElementById('logDetailModal'));
+            modal.show();
+        }
+        
+        // Setup auto-refresh
+        function setupAutoRefresh() {
+            const autoRefreshCheckbox = document.getElementById('auto-refresh');
+            
+            autoRefreshCheckbox.addEventListener('change', function() {
+                autoRefreshEnabled = this.checked;
+                
+                if (autoRefreshEnabled) {
+                    autoRefreshInterval = setInterval(fetchLogs, 5000);
+                    showNotification('Auto-refresh', 'Auto-refresh enabled');
+                } else {
+                    clearInterval(autoRefreshInterval);
+                    showNotification('Auto-refresh', 'Auto-refresh disabled', 'warning');
+                }
+            });
+            
+            // Initial setup
+            if (autoRefreshEnabled) {
+                autoRefreshInterval = setInterval(fetchLogs, 5000);
+            }
+        }
+        
         // Initial load
-        document.addEventListener('DOMContentLoaded', fetchLogs);
-
-        // Refresh button
-        document.getElementById('refreshBtn').addEventListener('click', fetchLogs);
-
-        // Auto-refresh every 15 seconds
-        setInterval(fetchLogs, 15000);
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial data load
+            fetchLogs();
+            
+            // Setup auto-refresh
+            setupAutoRefresh();
+            
+            // Setup filter change listeners
+            document.getElementById('model-filter').addEventListener('change', fetchLogs);
+            document.getElementById('tool-filter').addEventListener('change', fetchLogs);
+            document.getElementById('status-filter').addEventListener('change', fetchLogs);
+            document.getElementById('risk-filter').addEventListener('change', fetchLogs);
+            
+            // Refresh button
+            document.getElementById('refreshBtn').addEventListener('click', fetchLogs);
+            
+            // Export CSV button
+            document.getElementById('export-csv-btn').addEventListener('click', function() {
+                window.location.href = '/api/logs/export';
+            });
+            
+            // Reload policy button
+            document.getElementById('reload-policy-btn').addEventListener('click', function() {
+                fetch('/api/policy/reload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        showNotification('Policy Reload', 'Policy reloaded successfully', 'success');
+                    } else {
+                        showNotification('Policy Reload', 'Error: ' + data.message, 'error');
+                    }
+                })
+                .catch(error => {
+                    showNotification('Policy Reload', 'Error: ' + error, 'error');
+                });
+            });
+        });
     </script>
 </body>
 </html>
