@@ -3,13 +3,26 @@ MCP-Sec Gateway - Core request handler for Flask
 This module provides the routes for handling MCP traffic
 """
 import time
+import os
 import logging
+import requests
 from flask import Blueprint, request, jsonify
 
 from policy_engine import check_policy
 from rate_limiter import check_limit, RateLimitError
 from schema_validator import validate_input, validate_output, SchemaValidationError
 from audit_logger import log_event
+
+# Configure tool server URL
+TOOL_SERVER_URL = os.getenv("TOOL_SERVER_URL", "http://localhost:5001/tools")
+
+def call_tool_api(tool_name, payload):
+    """Call external tool service if allowed."""
+    endpoint = f"{TOOL_SERVER_URL}/{tool_name}"
+    res = requests.post(endpoint, json=payload, timeout=5)
+    if not res.ok:
+        raise Exception(f"Tool {tool_name} error: {res.status_code} {res.text}")
+    return res.json()
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -107,20 +120,41 @@ def tool_call():
         
         # If we've made it this far, the request is allowed
         response["allowed"] = True
-        response["status"] = "allowed"
         
-        # Log the allowed event
-        latency_ms = int((time.time() - start_time) * 1000)
-        log_event({
-            "model_id": model_id,
-            "session_id": session_id,
-            "tool": tool_name,
-            "input": input_data,
-            "status": "allowed",
-            "latency_ms": latency_ms
-        })
+        # Call the tool API
+        try:
+            tool_result = call_tool_api(tool_name, input_data)
+            response["result"] = tool_result
+            response["status"] = "allowed"
+            
+            # Log the allowed event with tool result
+            latency_ms = int((time.time() - start_time) * 1000)
+            log_event({
+                "model_id": model_id,
+                "session_id": session_id,
+                "tool": tool_name,
+                "input": input_data,
+                "status": "allowed",
+                "tool_result": tool_result,
+                "latency_ms": latency_ms
+            })
+        except Exception as e:
+            response["status"] = "error"
+            response["reason"] = f"Tool error: {str(e)}"
+            
+            # Log the tool error
+            latency_ms = int((time.time() - start_time) * 1000)
+            log_event({
+                "model_id": model_id,
+                "session_id": session_id,
+                "tool": tool_name,
+                "input": input_data,
+                "status": "error",
+                "reason": f"Tool error: {str(e)}",
+                "latency_ms": latency_ms
+            })
         
-        response["latency_ms"] = latency_ms
+        response["latency_ms"] = int((time.time() - start_time) * 1000)
         return jsonify(response)
     
     except Exception as e:

@@ -1,0 +1,112 @@
+Add ToolCall Execution Stub + Mock Tool Server
+🧠 Objective
+Extend SecureGateway so that when a ToolCall is allowed by policy:
+– The gateway calls a tool endpoint (real or mocked)
+– Includes the tool’s result in the final response
+– Logs the tool response or failure
+
+Also generate a minimal Flask mock server that simulates tool behavior.
+
+1️⃣ Modify /mcp/toolcall handler in mcp_routes.py
+Find this code (after if decision["allowed"]: block) and replace it:
+
+python
+Copy
+Edit
+if decision["allowed"]:
+    try:
+        tool_result = call_tool_api(tool_name, input_payload)
+        response["result"] = tool_result
+        response["status"] = "allowed"
+    except Exception as e:
+        response["status"] = "error"
+        response["reason"] = f"Tool error: {str(e)}"
+else:
+    response["status"] = "denied"
+    response["reason"] = decision["reason"]
+2️⃣ Add the stub function inside mcp_routes.py (or separate module)
+python
+Copy
+Edit
+import requests
+
+TOOL_SERVER_URL = os.getenv("TOOL_SERVER_URL", "http://localhost:5001/tools")
+
+def call_tool_api(tool_name, payload):
+    """Call external tool service if allowed."""
+    endpoint = f"{TOOL_SERVER_URL}/{tool_name}"
+    res = requests.post(endpoint, json=payload, timeout=5)
+    if not res.ok:
+        raise Exception(f"Tool {tool_name} error: {res.status_code} {res.text}")
+    return res.json()
+3️⃣ Patch audit_logger.py to log tool result or error
+Inside log_event(), optionally include:
+
+python
+Copy
+Edit
+event["tool_result"] = event.get("result", None)
+4️⃣ Create a new Replit file: mock_tool_server.py
+python
+Copy
+Edit
+from flask import Flask, request, jsonify
+app = Flask(__name__)
+
+@app.route("/tools/calendar.create_event", methods=["POST"])
+def calendar_event():
+    data = request.json
+    return jsonify({
+        "status": "ok",
+        "event_id": "ev-" + data["title"].lower().replace(" ", "-"),
+        "start_time": data["start_time"]
+    })
+
+@app.route("/tools/db.write_sensitive", methods=["POST"])
+def blocked_write():
+    return jsonify({"error": "Write to sensitive DB denied"}), 403
+
+@app.route("/tools/search.query", methods=["POST"])
+def search():
+    return jsonify({"results": ["result 1", "result 2"], "query": request.json.get("q")})
+
+@app.route("/healthz")
+def health():
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    app.run(port=5001)
+5️⃣ In Replit:
+Open a second tab
+
+Paste mock_tool_server.py
+
+Click Run to start the mock server
+
+Your gateway can now POST to:
+
+http://localhost:5001/tools/calendar.create_event
+
+.../db.write_sensitive
+
+.../search.query
+
+6️⃣ Set Replit secret (optional):
+env
+Copy
+Edit
+TOOL_SERVER_URL=http://localhost:5001/tools
+✅ Tests
+bash
+Copy
+Edit
+curl -X POST $GATEWAY/mcp/toolcall \
+ -H "Content-Type: application/json" -H "X-Admin-Key: $ADMIN_KEY" \
+ -d '{"model_id":"gpt-4o","session_id":"abc123","tool_name":"calendar.create_event","input":{"title":"sync","start_time":"2025-08-30T09:00:00Z"}}'
+→ Gateway allows the call, forwards to mock tool, returns event_id.
+
+📦 Commit message
+pgsql
+Copy
+Edit
+feat: add tool execution stub and mock tool server
