@@ -1,0 +1,150 @@
+The repo currently mixes FastAPI and Flask, contains unused SQLAlchemy, and has minor bugs that stop it from running cleanly in Replit.
+
+We will standardise on Flask, remove FastAPI, drop the DB, and make sure all five core modules (Gateway routes, Policy Engine, Schema Validator, Rate Limiter, Audit Logger) work exactly as described in ARCHITECTURE.md, POLICY_SCHEMA.md, and AUDIT_LOG_FORMAT.md.
+
+🔧 Do the following edits in one commit:
+Delete FastAPI & React artefacts
+
+Remove gateway.py, src/, vite.config.ts, and any fastapi imports to prevent confusion.
+
+Strip SQLAlchemy
+
+Delete models.py.
+
+In main.py, remove every line that references SQLAlchemy, DATABASE_URL, or create_engine.
+
+Patch main.py so Replit can run it:
+
+python
+Copy
+Edit
+import os, time, json, yaml
+from flask import Flask, request, jsonify, render_template_string
+from mcp_routes import mcp_bp            # (rename inside file if needed)
+from audit_logger import LOG_HISTORY
+
+app = Flask(__name__)
+app.register_blueprint(mcp_bp)
+
+@app.route("/healthz")
+def health():
+    return {"status": "ok"}
+
+@app.route("/logs")
+def logs():
+    return jsonify(LOG_HISTORY[-100:])
+
+@app.route("/dash")
+def dash():
+    return render_template_string(
+        "<h2>MCP‑Sec Audit Logs</h2><pre id='log'></pre>"
+        "<script>fetch('/logs').then(r=>r.json()).then(d=>{"
+        "document.getElementById('log').innerText="
+        "JSON.stringify(d, null, 2);});</script>"
+    )
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv('PORT', 8000)), debug=False)
+Fix mcp_routes.py (gateway blueprint)
+
+Ensure top has from flask import Blueprint, request, jsonify and create mcp_bp = Blueprint("mcp", __name__).
+
+Correct typo: start_time = time.time()
+
+In /mcp/toolresult, call schema_validator.validate_output(tool_name, output).
+
+Wrap all returns in jsonify({...}) with appropriate status codes.
+
+Update schema_validator.py
+
+python
+Copy
+Edit
+schema_path = os.path.join("schemas", f"{tool_name}.json")
+if not os.path.isfile(schema_path):
+    raise ValueError(f"Schema for {tool_name} not found")
+Harden audit_logger.py
+
+python
+Copy
+Edit
+import json, time
+LOG_HISTORY = []
+def log_event(event: dict):
+    line = json.dumps(event)
+    print(line, flush=True)
+    with open("audit.log", "a") as f:
+        f.write(line + "\n")
+    LOG_HISTORY.append(event)
+    if len(LOG_HISTORY) > 500:
+        LOG_HISTORY.pop(0)
+Rate limiter comment – in rate_limiter.py add:
+# NOTE: in‑memory only; swap for Redis in production.
+
+Re‑commit policies.yaml with Unix line‑breaks:
+
+yaml
+Copy
+Edit
+rules:
+  - model: "gpt-4*"
+    allow_tools: ["calendar.*", "search.*"]
+    deny_tools:  ["db.write*"]
+    max_calls_per_session: 5
+    active_hours: "08:00-18:00"
+Create / update project config files
+
+.replit
+
+ini
+Copy
+Edit
+run = "python main.py"
+language = "python3"
+entrypoint = "main.py"
+requirements.txt — minimal list:
+
+nginx
+Copy
+Edit
+Flask
+pyyaml
+jsonschema
+python-dotenv
+.env.example
+
+ini
+Copy
+Edit
+LOG_LEVEL=info
+POLICY_PATH=policies.yaml
+README – add quick‑start section for Replit:
+
+markdown
+Copy
+Edit
+### Run in Replit
+1. Click **Run** (Replit installs `requirements.txt` automatically).
+2. Open the webview pane → `/dash` to see live audit logs.
+3. Test with:
+   ```bash
+   curl -X POST $REPLIT_URL/mcp/toolcall \
+     -H "Content-Type: application/json" \
+     -d '{"model_id":"gpt-4o","session_id":"abc","tool_name":"calendar.create_event","input":{"title":"sync","start_time":"2025-05-08T09:00:00Z"}}'
+Copy
+Edit
+✅ Acceptance tests
+Replit’s Run button launches Flask on the assigned $PORT without error.
+
+Hitting /healthz returns {"status":"ok"}.
+
+Posting to /mcp/toolcall returns an allow/deny JSON.
+
+/dash shows the audit entries grow in real time.
+
+audit.log file is created and records each event line.
+
+No FastAPI or SQLAlchemy imports remain; requirements.txt installs in <30 s.
+
+Commit all edits with message “feat: Replit‑ready Flask cleanup”.
+
