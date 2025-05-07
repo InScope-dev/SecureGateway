@@ -46,8 +46,31 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 # Initialize the database with the app
 db.init_app(app)
 
-# Create database tables if they don't exist
+# Create database tables if they don't exist and perform migrations
 with app.app_context():
+    try:
+        # Check if we need to add the risk_level column
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        has_risk_level = False
+        
+        # Get columns for the AuditLog table
+        for column in inspector.get_columns('audit_log'):
+            if column['name'] == 'risk_level':
+                has_risk_level = True
+                break
+                
+        # If risk_level column doesn't exist, add it
+        if not has_risk_level:
+            logger.info("Adding risk_level column to audit_log table...")
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE audit_log ADD COLUMN risk_level VARCHAR(10) DEFAULT 'low'"))
+                conn.commit()
+            logger.info("risk_level column added successfully")
+    except Exception as e:
+        logger.error(f"Error during database migration: {e}")
+        
+    # Create tables that don't exist
     db.create_all()
     logger.info("Database tables created if they didn't exist")
 
@@ -125,6 +148,7 @@ with open("templates/dashboard.html", "w") as f:
                                         <th>Session ID</th>
                                         <th>Tool</th>
                                         <th>Status</th>
+                                        <th>Risk Level</th>
                                         <th>Latency (ms)</th>
                                         <th>Actions</th>
                                     </tr>
@@ -170,9 +194,11 @@ with open("templates/dashboard.html", "w") as f:
                     data.logs.forEach((log, index) => {
                         const tr = document.createElement('tr');
                         
-                        // Apply different row styling based on status
-                        if (log.status === 'denied') {
+                        // Apply different row styling based on risk level
+                        if (log.risk_level === 'high') {
                             tr.classList.add('table-danger');
+                        } else if (log.risk_level === 'medium') {
+                            tr.classList.add('table-warning');
                         } else if (log.status === 'allowed') {
                             tr.classList.add('table-success');
                         }
@@ -180,12 +206,21 @@ with open("templates/dashboard.html", "w") as f:
                         // Format timestamp to local time
                         const timestamp = new Date(log.timestamp).toLocaleString();
                         
+                        // Get color for risk level badge
+                        let riskBadgeClass = 'bg-success';
+                        if (log.risk_level === 'medium') {
+                            riskBadgeClass = 'bg-warning text-dark';
+                        } else if (log.risk_level === 'high') {
+                            riskBadgeClass = 'bg-danger';
+                        }
+                        
                         tr.innerHTML = `
                             <td>${timestamp}</td>
                             <td>${log.model_id || '-'}</td>
                             <td>${log.session_id || '-'}</td>
                             <td>${log.tool || '-'}</td>
                             <td><span class="badge ${log.status === 'allowed' ? 'bg-success' : 'bg-danger'}">${log.status}</span></td>
+                            <td><span class="badge ${riskBadgeClass}">${log.risk_level || 'low'}</span></td>
                             <td>${log.latency_ms !== undefined ? log.latency_ms : '-'}</td>
                             <td>
                                 <button class="btn btn-sm btn-outline-info view-details" data-index="${index}">

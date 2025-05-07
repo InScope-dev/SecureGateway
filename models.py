@@ -24,6 +24,7 @@ class AuditLog(db.Model):
     status = db.Column(db.String(20), index=True)
     reason = db.Column(db.Text, nullable=True)
     latency_ms = db.Column(db.Integer, nullable=True)
+    risk_level = db.Column(db.String(10), default="low", index=True)  # low, medium, high
     
     # Use JSON or Text type based on database
     # SQLite doesn't support real JSON columns, but PostgreSQL does
@@ -42,7 +43,8 @@ class AuditLog(db.Model):
             "session_id": self.session_id,
             "tool": self.tool,
             "status": self.status,
-            "latency_ms": self.latency_ms
+            "latency_ms": self.latency_ms,
+            "risk_level": self.risk_level
         }
         
         # Add optional fields if present
