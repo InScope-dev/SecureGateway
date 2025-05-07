@@ -1,0 +1,227 @@
+ Objective
+Enhance the existing Flask dashboard so it’s genuinely useful in day‑to‑day red‑team / SOC monitoring while remaining lightweight and self‑hosted on Replit.
+
+New capabilities to add (in order):
+
+Dynamic filters & search (time range, model, tool, status, free‑text).
+
+Live auto‑refresh (poll every 2 s).
+
+Colour‑coded rows (green allowed, red denied, amber error).
+
+Mini‑metrics (KPIs) – totals, allows, denies, top tools/models.
+
+CSV/JSON export for last N rows.
+
+Policy viewer & hot reload button.
+
+Simple API‑key auth on all dashboard routes.
+
+Keep the implementation plain Flask + vanilla JS + pure CSS (no React/Vite).
+All server data will come from improved JSON endpoints under /api/*.
+
+🔨 Step‑by‑Step Code Changes
+1. Create/Update Endpoints in main.py
+Replace the current /logs and /dash routes with the following:
+
+python
+Copy
+Edit
+from flask import jsonify, render_template_string, request, abort
+from functools import wraps
+from datetime import datetime, timedelta
+import os
+from audit_logger import LOG_HISTORY
+from policy_engine import load_policy, reload_policies
+
+ADMIN_KEY = os.getenv("ADMIN_KEY", "changeme")
+
+def require_api_key(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.headers.get("X-Admin-Key") != ADMIN_KEY:
+            return abort(401)
+        return f(*args, **kwargs)
+    return decorated
+
+# --- JSON API ---
+@app.get("/api/logs")
+@require_api_key
+def api_logs():
+    """Return filtered logs."""
+    # query params
+    since = request.args.get("since")          # ISO timestamp
+    model = request.args.get("model")
+    tool  = request.args.get("tool")
+    status = request.args.get("status")        # allowed / denied / error
+    limit = int(request.args.get("limit", 100))
+
+    logs = LOG_HISTORY
+    if since:
+        cutoff = datetime.fromisoformat(since)
+        logs = [l for l in logs if datetime.fromisoformat(l["timestamp"]) >= cutoff]
+    if model:
+        logs = [l for l in logs if l["model_id"].startswith(model)]
+    if tool:
+        logs = [l for l in logs if tool in l["tool"]]
+    if status:
+        logs = [l for l in logs if l["status"] == status]
+    return jsonify(logs[-limit:])
+
+@app.get("/api/metrics")
+@require_api_key
+def api_metrics():
+    """Return simple counts & top lists."""
+    total = len(LOG_HISTORY)
+    allows = sum(1 for l in LOG_HISTORY if l["status"] == "allowed")
+    denies = sum(1 for l in LOG_HISTORY if l["status"] == "denied")
+    recent = LOG_HISTORY[-500:]
+    top_tools = {}
+    top_models = {}
+    for l in recent:
+        top_tools[l["tool"]]  = top_tools.get(l["tool"], 0) + 1
+        top_models[l["model_id"]] = top_models.get(l["model_id"], 0) + 1
+    return {
+        "total": total,
+        "allows": allows,
+        "denies": denies,
+        "top_tools": sorted(top_tools.items(), key=lambda x: x[1], reverse=True)[:5],
+        "top_models": sorted(top_models.items(), key=lambda x: x[1], reverse=True)[:5],
+    }
+
+@app.get("/api/policy")
+@require_api_key
+def api_policy():
+    return {"policy": load_policy()}
+
+@app.post("/api/policy/reload")
+@require_api_key
+def api_policy_reload():
+    reload_policies()
+    return {"status": "reloaded"}
+
+@app.get("/api/logs/export")
+@require_api_key
+def api_logs_export():
+    """Download CSV of recent logs."""
+    import csv, io
+    limit = int(request.args.get("limit", 1000))
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=LOG_HISTORY[0].keys())
+    writer.writeheader()
+    for row in LOG_HISTORY[-limit:]:
+        writer.writerow(row)
+    return output.getvalue(), 200, {
+        "Content-Type": "text/csv",
+        "Content-Disposition": "attachment; filename=audit.csv",
+    }
+2. Replace /dash HTML with Interactive Page
+Still in main.py, update the dash route:
+
+python
+Copy
+Edit
+DASH_HTML = """
+<!doctype html>
+<html>
+<head>
+<title>MCP‑Sec Dashboard</title>
+<style>
+  body{font-family:Arial;margin:0;padding:0;background:#121212;color:#eee;}
+  header{padding:10px;background:#202020;display:flex;gap:20px;align-items:center;}
+  header input,header select{background:#303030;color:#fff;border:1px solid #555;padding:4px;}
+  #metrics{display:flex;gap:20px;margin:10px;}
+  .metric{padding:10px;background:#202020;border-radius:6px;}
+  table{width:100%;border-collapse:collapse;margin-top:10px;}
+  th,td{padding:6px 8px;border-bottom:1px solid #333;}
+  tr.allowed{background:#0b3d0b;} tr.denied{background:#4d0b0b;}
+  tr.error{background:#4d360b;}
+</style>
+</head>
+<body>
+<header>
+  <label>Since (ISO): <input id="since" type="text" placeholder="2025-05-07T00:00:00"></label>
+  <label>Model: <input id="model" type="text"></label>
+  <label>Tool:  <input id="tool"  type="text"></label>
+  <label>Status:
+    <select id="status">
+      <option value="">all</option><option>allowed</option><option>denied</option><option>error</option>
+    </select>
+  </label>
+  <button onclick="reloadPolicy()">Reload Policy</button>
+</header>
+<div id="metrics"></div>
+<table id="logtbl"><thead><tr>
+  <th>Time</th><th>Model</th><th>Tool</th><th>Status</th><th>Reason</th>
+</tr></thead><tbody></tbody></table>
+<script>
+const apiKey = prompt("Admin API key:", "");
+const headers = {"X-Admin-Key": apiKey};
+function qs(id){return document.getElementById(id)}
+async function fetchJSON(url){
+  const res = await fetch(url,{headers}); if(!res.ok) return [];
+  return res.json();
+}
+async function loadMetrics(){
+  const m=await fetchJSON("/api/metrics");
+  qs("metrics").innerHTML=
+    `<div class=metric>Total ${m.total}</div>`+
+    `<div class=metric>Allows ${m.allows}</div>`+
+    `<div class=metric>Denies ${m.denies}</div>`;
+}
+async function loadLogs(){
+  const p=new URLSearchParams();
+  ["since","model","tool","status"].forEach(k=>{const v=qs(k).value;if(v)p.set(k,v)});
+  const logs=await fetchJSON("/api/logs?"+p.toString());
+  const tb=qs("logtbl").querySelector("tbody");
+  tb.innerHTML=logs.map(l=>`
+    <tr class="${l.status}">
+      <td>${l.timestamp}</td><td>${l.model_id}</td>
+      <td>${l.tool}</td><td>${l.status}</td><td>${l.reason||""}</td>
+    </tr>`).join("");
+}
+function reloadPolicy(){
+  fetch("/api/policy/reload",{method:"POST",headers}).then(()=>alert("Policy reloaded"));
+}
+setInterval(()=>{loadLogs();loadMetrics()},2000);
+loadLogs();loadMetrics();
+</script>
+</body></html>
+"""
+
+@app.route("/dash")
+@require_api_key
+def dash():
+    return DASH_HTML
+3. Expose Helper in policy_engine.py
+python
+Copy
+Edit
+def load_policy():
+    with open(os.getenv("POLICY_PATH", "policies.yaml")) as f:
+        return yaml.safe_load(f)
+4. Requirements & .env
+requirements.txt – add python-dotenv (already), nothing else.
+
+.env (in Replit Secrets) – set
+
+ini
+Copy
+Edit
+ADMIN_KEY=<strong-random>
+✅ Acceptance checklist
+Run ➜ Flask boots on $PORT.
+
+Visit /dash ➜ prompt for key ➜ dashboard appears.
+
+Metrics cards update every 2 s.
+
+Filters instantly narrow the table (no page reload).
+
+“Reload Policy” succeeds and flashes alert.
+
+/api/logs/export?limit=500 downloads a CSV.
+
+All dashboard and API routes (except /healthz) reject wrong/absent key.
+
+No dependencies on FastAPI, SQLAlchemy, React remain; project fits Replit’s free container limits.

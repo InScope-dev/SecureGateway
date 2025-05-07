@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Global policy store
 POLICIES = {}
 
-def load_policies() -> Dict[str, Any]:
+def load_policy() -> Dict[str, Any]:
     """
     Load policies from YAML file
     """
@@ -51,14 +51,14 @@ def load_policies() -> Dict[str, Any]:
         return {"rules": []}
 
 # Load policies at module import
-POLICIES = load_policies()
+POLICIES = load_policy()
 
 def reload_policies() -> None:
     """
     Reload policies from YAML file
     """
     global POLICIES
-    POLICIES = load_policies()
+    POLICIES = load_policy()
     logger.info("Policies reloaded")
 
 def check_policy(model_id: str, tool_name: str, session_id: str) -> Tuple[bool, Optional[str]]:

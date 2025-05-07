@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Constants
-ADMIN_KEY = os.environ.get("ADMIN_KEY")
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "changeme")
 
 # Get a logger for this module
 logger = logging.getLogger(__name__)
@@ -129,29 +129,14 @@ if os.environ.get("ENABLE_DEMO_DATA", "false").lower() == "true":
 def require_api_key(view_function):
     @functools.wraps(view_function)
     def decorated_function(*args, **kwargs):
-        # Check session first
-        if session.get("authenticated"):
-            return view_function(*args, **kwargs)
-        
-        # Check for API key in query params, headers or cookies
-        api_key = request.args.get("key") or request.headers.get("X-API-KEY")
-        
-        if not api_key and request.cookies.get("api_key"):
-            api_key = request.cookies.get("api_key")
+        # Check for API key in header
+        api_key = request.headers.get("X-Admin-Key")
         
         if not api_key:
-            if request.content_type and "application/json" in request.content_type:
-                return jsonify({"error": "Authentication required"}), 401
-            return redirect(url_for("login", next=request.path))
+            return abort(401)
         
         if api_key != ADMIN_KEY:
-            if request.content_type and "application/json" in request.content_type:
-                return jsonify({"error": "Invalid API key"}), 403
-            session["auth_error"] = "Invalid API key"
-            return redirect(url_for("login", next=request.path))
-        
-        # Store authentication in session
-        session["authenticated"] = True
+            return abort(401)
         
         # Continue to the view
         return view_function(*args, **kwargs)
@@ -458,88 +443,77 @@ def logout():
     response.delete_cookie("api_key")
     return response
 
-# API endpoints
+# --- JSON API ---
 @app.route("/api/logs")
 @require_api_key
 def api_logs():
-    # Get query parameters for filtering
+    """Return filtered logs."""
+    # query params
+    since = request.args.get("since")          # ISO timestamp
     model = request.args.get("model")
-    tool = request.args.get("tool")
-    status = request.args.get("status")
-    risk = request.args.get("risk")
+    tool  = request.args.get("tool")
+    status = request.args.get("status")        # allowed / denied / error
     limit = int(request.args.get("limit", 100))
-    
-    # Apply filters
-    filtered_logs = LOG_HISTORY.copy()
-    
+
+    logs = LOG_HISTORY
+    if since:
+        cutoff = datetime.fromisoformat(since)
+        logs = [l for l in logs if datetime.fromisoformat(l["timestamp"]) >= cutoff]
     if model:
-        filtered_logs = [log for log in filtered_logs if log.get("model_id") and model.lower() in log.get("model_id").lower()]
-    
+        logs = [l for l in logs if l["model_id"].startswith(model)]
     if tool:
-        filtered_logs = [log for log in filtered_logs if log.get("tool") and tool.lower() in log.get("tool").lower()]
-    
+        logs = [l for l in logs if tool in l["tool"]]
     if status:
-        filtered_logs = [log for log in filtered_logs if log.get("status") == status]
-    
-    if risk:
-        filtered_logs = [log for log in filtered_logs if log.get("risk_level") == risk]
-    
-    # Return the most recent logs up to the limit
-    return jsonify(filtered_logs[-limit:])
+        logs = [l for l in logs if l["status"] == status]
+    return jsonify(logs[-limit:])
 
 @app.route("/api/metrics")
 @require_api_key
 def api_metrics():
-    return jsonify(metrics)
+    """Return simple counts & top lists."""
+    total = len(LOG_HISTORY)
+    allows = sum(1 for l in LOG_HISTORY if l["status"] == "allowed")
+    denies = sum(1 for l in LOG_HISTORY if l["status"] == "denied")
+    recent = LOG_HISTORY[-500:]
+    top_tools = {}
+    top_models = {}
+    for l in recent:
+        top_tools[l["tool"]]  = top_tools.get(l["tool"], 0) + 1
+        top_models[l["model_id"]] = top_models.get(l["model_id"], 0) + 1
+    return {
+        "total": total,
+        "allows": allows,
+        "denies": denies,
+        "top_tools": sorted(top_tools.items(), key=lambda x: x[1], reverse=True)[:5],
+        "top_models": sorted(top_models.items(), key=lambda x: x[1], reverse=True)[:5],
+    }
 
 @app.route("/api/policy")
 @require_api_key
 def api_policy():
-    try:
-        return jsonify(policy_engine.load_policies())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return {"policy": policy_engine.load_policy()}
 
 @app.route("/api/policy/reload", methods=["POST"])
 @require_api_key
 def api_policy_reload():
-    try:
-        policy_engine.reload_policies()
-        return jsonify({"status": "success", "message": "Policy reloaded successfully"})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    policy_engine.reload_policies()
+    return {"status": "reloaded"}
 
 @app.route("/api/logs/export")
 @require_api_key
 def api_logs_export():
-    # Create CSV from LOG_HISTORY
+    """Download CSV of recent logs."""
+    limit = int(request.args.get("limit", 1000))
     output = io.StringIO()
-    writer = csv.DictWriter(
-        output, 
-        fieldnames=["timestamp", "model_id", "session_id", "tool", "status", "risk_level", "reason", "latency_ms"]
-    )
-    writer.writeheader()
-    
-    for log in LOG_HISTORY:
-        # Extract only the fields we want
-        row = {
-            "timestamp": log.get("timestamp", ""),
-            "model_id": log.get("model_id", ""),
-            "session_id": log.get("session_id", ""),
-            "tool": log.get("tool", ""),
-            "status": log.get("status", ""),
-            "risk_level": log.get("risk_level", ""),
-            "reason": log.get("reason", ""),
-            "latency_ms": log.get("latency_ms", "")
-        }
-        writer.writerow(row)
-    
-    # Create response with CSV file
-    response = Response(
-        output.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": "attachment;filename=mcp_sec_logs.csv"}
-    )
+    writer = csv.DictWriter(output, fieldnames=LOG_HISTORY[0].keys() if LOG_HISTORY else [])
+    if LOG_HISTORY:
+        writer.writeheader()
+        for row in LOG_HISTORY[-limit:]:
+            writer.writerow(row)
+    return output.getvalue(), 200, {
+        "Content-Type": "text/csv",
+        "Content-Disposition": "attachment; filename=audit.csv",
+    }
     
     return response
 
