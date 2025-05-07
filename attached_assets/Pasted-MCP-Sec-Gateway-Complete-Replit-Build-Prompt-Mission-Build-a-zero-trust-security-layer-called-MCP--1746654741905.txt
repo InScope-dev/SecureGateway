@@ -1,0 +1,169 @@
+MCP‑Sec Gateway – Complete Replit Build Prompt
+Mission
+Build a zero‑trust security layer called MCP‑Sec Gateway that inspects and controls Model Context Protocol (MCP) traffic between AI agents (Claude, GPT‑4, Mistral, etc.) and external tools.
+It must implement the enforcement model, policy schema, audit format, and architecture described in the project docsARCHITECTUREPOLICY_SCHEMASECURITY_MODELAUDIT_LOG_FORMAT.
+
+Core Requirements
+
+Policy enforcement – per‑model tool allow/deny, active hours, call caps.
+
+Schema validation – JSON‑Schema v7 on every tool input/output.
+
+Rate limiting – per‑session & per‑model, in‑memory (no Redis).
+
+Audit logging – JSON lines exactly like AUDIT_LOG_FORMAT.md.
+
+Dashboard – /logs (JSON) and /dash (HTML) to view recent events.
+
+Replit Constraints
+
+Always‑on FastAPI server (Uvicorn) using the built‑in web view.
+
+Secrets via Replit “Secrets” tab or local .env (use python‑dotenv).
+
+No external Redis → use Python dict with TTL for rate limiting.
+
+File writes (logs) are fine; the Replit FS is persistent per repl.
+
+Tech Stack
+
+Python 3.11
+
+FastAPI, Uvicorn, pyyaml, jsonschema, pydantic, python‑dotenv
+
+requirements.txt will list them so Replit auto‑installs.
+
+File / Module Layout
+
+bash
+Copy
+Edit
+.
+├─ main.py            # launches FastAPI app
+├─ gateway.py         # core request handler
+├─ policy_engine.py   # loads + enforces policies.yaml
+├─ schema_validator.py
+├─ rate_limiter.py
+├─ audit_logger.py
+├─ policies.yaml      # starter rules from docs
+├─ schemas/
+│   └─ calendar.create_event.json
+├─ requirements.txt
+└─ .env.example       # sample env vars
+System Flow
+Prompt/ToolCall → gateway.enforce() → policy_engine → rate_limiter → schema_validator → tool (if allowed) → audit_logger
+
+Detailed Tasks
+1️⃣ gateway.py
+
+FastAPI router with two POST endpoints:
+
+/mcp/toolcall – body: {model_id, session_id, tool_name, input}
+
+/mcp/toolresult – body: {model_id, session_id, tool_name, output}
+
+Workflow per request:
+
+policy_engine.check_policy(...)
+
+rate_limiter.check_limit(...)
+
+schema_validator.validate_input|output(...)
+
+audit_logger.log_event({...}) (including latency)
+
+Return structured JSON: {allowed, reason, status, result?}
+
+2️⃣ policy_engine.py
+
+Load policies.yaml at import. Structure must follow doc examplePOLICY_SCHEMA.
+
+Function check_policy(model_id, tool_name, session_id) returns (allowed, reason).
+
+Features: wildcards, active_hours, max_calls_per_session.
+
+Provide reload_policies() and expose POST /reload in main.py.
+
+3️⃣ schema_validator.py
+
+Folder schemas/ holds individual tool schemas.
+
+Functions validate_input(tool_name, payload) and validate_output(...).
+
+Use jsonschema.validate; raise SchemaValidationError on failure.
+
+4️⃣ rate_limiter.py
+
+Global dict USAGE = {(model, session): {count:int, first_ts:float}}.
+
+Enforce max_calls_per_session from the active policy.
+
+Reset counters after 24 h (TTL check). Raise RateLimitError on breach.
+
+5️⃣ audit_logger.py
+
+Global list LOG_HISTORY; append a dict for every event.
+
+Write each dict as JSON line to audit.log and print() it.
+
+Fields must match AUDIT_LOG_FORMAT.md (timestamp, ids, tool, payload, status, reason, latency).
+
+6️⃣ main.py
+
+Import FastAPI app from gateway.py.
+
+Add:
+
+GET /logs – returns last 100 log entries (JSON).
+
+GET /dash – simple HTML/JS that fetches /logs and pretty‑prints.
+
+Include a demo @app.get("/") root route that says “MCP‑Sec Gateway OK”.
+
+Use if __name__ == "__main__": uvicorn.run(...) so Replit’s Run button works.
+
+7️⃣ policies.yaml (starter)
+
+yaml
+Copy
+Edit
+rules:
+  - model: "gpt-4*"
+    allow_tools: ["calendar.*", "search.*"]
+    deny_tools: ["db.write*"]
+    max_calls_per_session: 5
+    active_hours: "08:00-18:00"
+8️⃣ schemas/calendar.create_event.json (example)
+
+json
+Copy
+Edit
+{
+  "type": "object",
+  "required": ["title", "start_time"],
+  "properties": {
+    "title":      { "type": "string" },
+    "start_time": { "type": "string", "format": "date-time" },
+    "location":   { "type": "string" }
+  }
+}
+9️⃣ requirements.txt
+
+nginx
+Copy
+Edit
+fastapi
+uvicorn
+pyyaml
+jsonschema
+pydantic
+python-dotenv
+🔐 .env.example
+
+ini
+Copy
+Edit
+LOG_LEVEL=info
+POLICY_PATH=policies.yaml
+Deliverables
+Write every file above with clean, commented code so the project runs immediately in Replit after “Run”. Ensure the FastAPI server starts on $PORT
