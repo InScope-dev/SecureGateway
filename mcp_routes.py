@@ -8,10 +8,11 @@ import logging
 import requests
 from flask import Blueprint, request, jsonify
 
-from policy_engine import check_policy
+from policy_engine import check_policy, check_policy_contextual
 from rate_limiter import check_limit, RateLimitError
 from schema_validator import validate_input, validate_output, SchemaValidationError
 from audit_logger import log_event
+from session_tracker import init_session, update_tool_call, get_context
 
 # Configure tool server URL - default to internal mock endpoints
 TOOL_SERVER_URL = os.getenv("TOOL_SERVER_URL", None)
@@ -65,6 +66,52 @@ logger = logging.getLogger(__name__)
 # Create the blueprint
 mcp_bp = Blueprint("mcp", __name__)
 
+@mcp_bp.route("/mcp/prompt", methods=["POST"])
+def prompt():
+    """
+    Process a prompt from an AI model and initialize the session
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "status": "error",
+                "reason": "Invalid JSON body"
+            }), 400
+            
+        # Validate required fields
+        for field in ["model_id", "session_id", "prompt"]:
+            if field not in data:
+                return jsonify({
+                    "status": "error",
+                    "reason": f"Missing required field: {field}"
+                }), 400
+        
+        model_id = data["model_id"]
+        session_id = data["session_id"]
+        prompt_text = data["prompt"]
+        
+        # Initialize session
+        init_session(session_id, model_id, prompt_text)
+        
+        # Log the prompt event
+        log_event({
+            "model_id": model_id,
+            "session_id": session_id,
+            "event_type": "prompt",
+            "prompt": prompt_text[:200] + "..." if len(prompt_text) > 200 else prompt_text,
+            "status": "recorded"
+        })
+        
+        return jsonify({"status": "recorded"})
+        
+    except Exception as e:
+        logger.error(f"Error processing prompt: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "reason": f"Internal server error: {str(e)}"
+        }), 500
+
 @mcp_bp.route("/mcp/toolcall", methods=["POST"])
 def tool_call():
     """
@@ -103,7 +150,14 @@ def tool_call():
             "reason": None
         }
         
-        # Check policy
+        # Get session context for contextual policy checks
+        context = get_context(session_id)
+        if not context:
+            # Initialize session if it doesn't exist
+            init_session(session_id, model_id)
+            context = get_context(session_id)
+        
+        # 1. Basic policy check
         allowed, reason = check_policy(model_id, tool_name, session_id)
         if not allowed:
             response["reason"] = reason
@@ -117,13 +171,35 @@ def tool_call():
                 "reason": reason,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
+            # Update session tracker
+            update_tool_call(session_id, tool_name, input_data, "denied", reason=reason)
             return jsonify(response)
         
-        # Check rate limits
+        # 2. Contextual policy check (only if basic check passed)
+        contextual_decision = check_policy_contextual(model_id, tool_name, session_id, context)
+        if not contextual_decision.get("allowed", True):
+            reason = contextual_decision.get("reason", "Denied by contextual policy")
+            response["reason"] = reason
+            # Log the denied event
+            log_event({
+                "model_id": model_id,
+                "session_id": session_id,
+                "tool": tool_name,
+                "input": input_data,
+                "status": "denied",
+                "reason": reason,
+                "latency_ms": int((time.time() - start_time) * 1000)
+            })
+            # Update session tracker
+            update_tool_call(session_id, tool_name, input_data, "denied", reason=reason)
+            return jsonify(response)
+        
+        # 3. Check rate limits
         try:
             check_limit(model_id, session_id)
         except RateLimitError as e:
-            response["reason"] = str(e)
+            reason = str(e)
+            response["reason"] = reason
             # Log the rate-limited event
             log_event({
                 "model_id": model_id,
@@ -131,16 +207,19 @@ def tool_call():
                 "tool": tool_name,
                 "input": input_data,
                 "status": "denied",
-                "reason": str(e),
+                "reason": reason,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
+            # Update session tracker
+            update_tool_call(session_id, tool_name, input_data, "denied", reason=reason)
             return jsonify(response)
         
-        # Validate schema
+        # 4. Validate schema
         try:
             validate_input(tool_name, input_data)
         except SchemaValidationError as e:
-            response["reason"] = f"Schema validation error: {str(e)}"
+            reason = f"Schema validation error: {str(e)}"
+            response["reason"] = reason
             # Log the validation error
             log_event({
                 "model_id": model_id,
@@ -148,15 +227,17 @@ def tool_call():
                 "tool": tool_name,
                 "input": input_data,
                 "status": "denied",
-                "reason": f"Schema validation error: {str(e)}",
+                "reason": reason,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
+            # Update session tracker
+            update_tool_call(session_id, tool_name, input_data, "denied", reason=reason)
             return jsonify(response)
         
         # If we've made it this far, the request is allowed
         response["allowed"] = True
         
-        # Call the tool API
+        # 5. Call the tool API
         try:
             tool_result = call_tool_api(tool_name, input_data)
             response["result"] = tool_result
@@ -173,9 +254,12 @@ def tool_call():
                 "tool_result": tool_result,
                 "latency_ms": latency_ms
             })
+            # Update session tracker
+            update_tool_call(session_id, tool_name, input_data, "allowed", output=tool_result)
         except Exception as e:
+            reason = f"Tool error: {str(e)}"
             response["status"] = "error"
-            response["reason"] = f"Tool error: {str(e)}"
+            response["reason"] = reason
             
             # Log the tool error
             latency_ms = int((time.time() - start_time) * 1000)
@@ -185,9 +269,11 @@ def tool_call():
                 "tool": tool_name,
                 "input": input_data,
                 "status": "error",
-                "reason": f"Tool error: {str(e)}",
+                "reason": reason,
                 "latency_ms": latency_ms
             })
+            # Update session tracker
+            update_tool_call(session_id, tool_name, input_data, "error", reason=reason)
         
         response["latency_ms"] = int((time.time() - start_time) * 1000)
         return jsonify(response)
@@ -270,7 +356,8 @@ def tool_result():
         try:
             validate_output(tool_name, output_data)
         except SchemaValidationError as e:
-            response["reason"] = f"Schema validation error: {str(e)}"
+            reason = f"Schema validation error: {str(e)}"
+            response["reason"] = reason
             # Log the validation error
             log_event({
                 "model_id": model_id,
@@ -278,7 +365,7 @@ def tool_result():
                 "tool": tool_name,
                 "output": output_data,
                 "status": "denied",
-                "reason": f"Schema validation error: {str(e)}",
+                "reason": reason,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
             return jsonify(response)

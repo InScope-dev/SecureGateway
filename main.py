@@ -425,20 +425,30 @@ def api_get_config():
         "max_hist": int(os.getenv("MAX_HIST", 500)),
         "auto_refresh_ms": int(os.getenv("AUTO_REFRESH_MS", 2000)),
         "policy_yaml": Path(os.getenv("POLICY_PATH", "policies.yaml")).read_text(),
+        "contextual_policy_yaml": Path("contextual_policy.yaml").read_text(),
     }
 
 @app.route("/api/config", methods=["POST"])
 @require_api_key
 def api_save_config():
     data = request.json or {}
-    # 1. Update policy
+    # 1. Update basic policy
     if "policy_yaml" in data:
         Path(os.getenv("POLICY_PATH", "policies.yaml")).write_text(data["policy_yaml"])
+    
+    # 2. Update contextual policy
+    if "contextual_policy_yaml" in data:
+        Path("contextual_policy.yaml").write_text(data["contextual_policy_yaml"])
+    
+    # 3. Reload policies if either was updated
+    if "policy_yaml" in data or "contextual_policy_yaml" in data:
         policy_engine.reload_policies()
-    # 2. Update runtime env vars (non-persistent in Replit)
+        
+    # 4. Update runtime env vars (non-persistent in Replit)
     for k in ("LOG_LEVEL", "MAX_HIST", "AUTO_REFRESH_MS"):
         if k.lower() in data:
             os.environ[k] = str(data[k.lower()])
+            
     return {"status": "saved"}
 
 @app.route("/dash", methods=["GET"])
@@ -505,8 +515,12 @@ def dash():
   <label>Auto‑refresh ms:
     <input id="cfg_auto" type="number" step="500">
   </label>
-  <h3>Policies.yaml</h3>
-  <textarea id="policy_editor" style="width:100%;height:300px;font-family:monospace;"></textarea>
+  <h3>Basic Policy (policies.yaml)</h3>
+  <textarea id="policy_editor" style="width:100%;height:250px;font-family:monospace;"></textarea>
+  
+  <h3>Contextual Policy (contextual_policy.yaml)</h3>
+  <textarea id="contextual_policy_editor" style="width:100%;height:250px;font-family:monospace;"></textarea>
+  
   <br><button onclick="saveConfig()">Save & Reload</button>
   <span id="save_msg"></span>
 </div>
@@ -550,6 +564,7 @@ async function loadConfig(){
   qs("cfg_max_hist").value = cfg.max_hist;
   qs("cfg_auto").value = cfg.auto_refresh_ms;
   qs("policy_editor").value = cfg.policy_yaml;
+  qs("contextual_policy_editor").value = cfg.contextual_policy_yaml;
 }
 
 async function saveConfig(){
@@ -557,7 +572,8 @@ async function saveConfig(){
     log_level: qs("cfg_log_level").value,
     max_hist: parseInt(qs("cfg_max_hist").value),
     auto_refresh_ms: parseInt(qs("cfg_auto").value),
-    policy_yaml: qs("policy_editor").value
+    policy_yaml: qs("policy_editor").value,
+    contextual_policy_yaml: qs("contextual_policy_editor").value
   };
   const res = await fetch("/api/config",{
     method: "POST",

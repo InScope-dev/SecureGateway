@@ -85,6 +85,10 @@ def load_contextual_policies(path="contextual_policy.yaml") -> List[Dict[str, An
         logger.error(f"Unexpected error loading contextual policies: {str(e)}")
         return []
 
+# Load policies at module import
+POLICIES = load_policy()
+CONTEXTUAL_POLICIES = load_contextual_policies()
+
 def reload_policies() -> None:
     """
     Reload basic and contextual policies from YAML files
@@ -139,6 +143,60 @@ def check_policy(model_id: str, tool_name: str, session_id: str) -> Tuple[bool, 
     
     # If no rule matched, deny by default
     return False, f"No policy rule matched for model {model_id} and tool {tool_name}"
+
+def check_policy_contextual(model_id: str, tool_name: str, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Check if the tool call is allowed based on session context
+    
+    This performs advanced policy checks that consider the entire session history:
+    - Prompt content
+    - Prior denials
+    - Tool usage sequence
+    
+    Args:
+        model_id: The ID of the model
+        tool_name: The name of the tool being called
+        session_id: The ID of the current session
+        context: Session context data
+        
+    Returns:
+        Dict with keys: 'allowed' (bool) and optionally 'reason' (str)
+    """
+    # If no contextual rules are defined, allow by default (basic policy already checked)
+    if not CONTEXTUAL_POLICIES:
+        return {"allowed": True}
+    
+    prompt = context.get("prompt", "")
+    calls = context.get("tool_calls", [])
+    
+    for rule in CONTEXTUAL_POLICIES:
+        # Check if this rule applies to this tool
+        when_tool = rule.get("when_tool", "")
+        if when_tool and not re.fullmatch(when_tool, tool_name):
+            continue
+        
+        # Block if prompt contains any forbidden phrases
+        for phrase in rule.get("block_if_prompt_contains", []):
+            if phrase.lower() in prompt.lower():
+                return {"allowed": False, "reason": f"Prompt contains blocked phrase: '{phrase}'"}
+        
+        # Block if N or more previous denials in session
+        if "block_if_previous_denials" in rule:
+            max_denials = rule["block_if_previous_denials"]
+            denials = sum(1 for c in calls if c.get("status") == "denied")
+            if denials >= max_denials:
+                return {"allowed": False, "reason": f"Too many prior denials in session ({denials})"}
+        
+        # Block if required prior tool not used successfully
+        if "require_prior_successful_tool" in rule:
+            required_tool = rule["require_prior_successful_tool"]
+            found = any(c.get("tool") == required_tool and c.get("status") == "allowed" 
+                       for c in calls)
+            if not found:
+                return {"allowed": False, "reason": f"Missing required prior tool: {required_tool}"}
+    
+    # All contextual rules passed
+    return {"allowed": True}
 
 def _match_pattern(value: str, pattern: str) -> bool:
     """
