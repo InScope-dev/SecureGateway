@@ -1,18 +1,14 @@
-# Default policy configuration for MCP-Sec Gateway
-rules:
-  - name: "Default allow for trusted models"
-    model: "*"
-    allow_tools:
-      - "search.*"
-      - "calendar.*"
-      - "email.read"
-    
-  - name: "Default deny for sensitive tools"
-    model: "*"
-    deny_tools:
-      - "file.write"
-      - "file.delete"
-      - "system.*"
-      - "execute.*"
-      - "admin.*"
-      - "config.*"
+name: "Default Project Policy"
+version: "1.0.0"
+description: "Default policy for projects"
+allow_models: ["gpt-4*", "claude*", "gemini*", "llama*"]
+allow_tools: ["search.*", "file.read"]
+deny_tools: ["system.*", "file.write"]
+model_tool_map:
+  "gpt-4*": ["search.*", "file.read"]
+  "claude*": ["search.*"]
+rate_limits:
+  default:
+    calls_per_minute: 10
+    burst: 20
+max_token_context: 4096

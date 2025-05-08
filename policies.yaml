@@ -1,6 +1,23 @@
-rules:
-  - model: "gpt-4*"
-    allow_tools: ["calendar.*", "search.*"]
-    deny_tools:  ["db.write*"]
-    max_calls_per_session: 5
-    active_hours: "00:00-23:59"
+name: "MCP-Sec Gateway Default Policy"
+version: "1.0.0"
+description: "Default security policy for MCP-Sec Gateway"
+allow_models: ["gpt-4*", "claude*", "gemini*", "llama*"]
+allow_tools: ["calendar.*", "search.*", "email.*", "file.read"]
+deny_tools:  ["db.write*", "system.*", "file.write"]
+model_tool_map:
+  "gpt-4*": ["calendar.*", "search.*", "email.*", "file.read"]
+  "claude*": ["calendar.*", "search.*", "email.*"]
+  "gemini*": ["search.*"]
+rate_limits:
+  default:
+    calls_per_minute: 10
+    burst: 20
+  tools:
+    "file.*":
+      calls_per_minute: 5
+      burst: 10
+  models:
+    "gpt-4*":
+      calls_per_minute: 20
+      burst: 30
+max_token_context: 8192

@@ -1,25 +1,40 @@
 # Contextual policies for MCP-Sec Gateway
 # These policies are evaluated based on session context
 # and can make more sophisticated security decisions
-- name: "No file.write after denied attempts"
-  conditions:
-    - type: "previous_denial"
-      tool: "file.write"
-      count: 1
-      window_seconds: 3600
-  action:
-    deny_tools: 
-      - "file.write"
-    reason: "File write blocked after previous denial"
+name: "MCP-Sec Gateway Contextual Policy"
+version: "1.0.0"
+description: "Contextual security policies that adapt based on session context"
+rules:
+  - name: "No file.write after denied attempts"
+    conditions:
+      - type: "previous_denial"
+        tool: "file.write"
+        count: 1
+        window_seconds: 3600
+    action:
+      deny_tools: 
+        - "file.write"
+      reason: "File write blocked after previous denial"
 
-- name: "No system operations after suspicious tool use"
-  conditions:
-    - type: "previous_call"
-      tool_pattern: "file.*"
-      count: 3
-      window_seconds: 60
-  action:
-    deny_tools:
-      - "system.*"
-      - "execute.*"
-    reason: "System operations blocked due to suspicious tool usage pattern"
+  - name: "No system operations after suspicious tool use"
+    conditions:
+      - type: "previous_call"
+        tool_pattern: "file.*"
+        count: 3
+        window_seconds: 60
+    action:
+      deny_tools:
+        - "system.*"
+        - "execute.*"
+      reason: "System operations blocked due to suspicious tool usage pattern"
+
+  - name: "Restrict tools for high-risk sessions"
+    conditions:
+      - type: "risk_score"
+        threshold: 0.7
+    action:
+      deny_tools:
+        - "file.write"
+        - "system.*"
+        - "network.*"
+      reason: "High risk session detected, restricting sensitive operations"

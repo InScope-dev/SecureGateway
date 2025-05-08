@@ -1,37 +1,44 @@
 # Shadow mode contextual policies - Not enforced, only simulated
 # These rules will be evaluated but not actually enforced
 # Used for testing new policy configurations
-
-shadow_rules:
+name: "MCP-Sec Gateway Shadow Policy"
+version: "1.0.0"
+description: "Shadow mode contextual policies for testing new rules without enforcement"
+rules:
   # Example rule 1: Block high-risk tools after 3 regular tool calls
   - name: "Shadow - High-risk after sequence"
     description: "Demo rule that detects high-risk tool usage after multiple regular tool calls"
-    condition:
-      tool_categories: ["file_write", "code_execution"]
-      prior_tools_count: 3
+    conditions:
+      - type: "previous_call"
+        count: 3
+        window_seconds: 300
     action:
-      block: true
+      deny_tools: ["file.write", "system.*"]
       reason: "SHADOW MODE: High-risk tool detected after sequence of regular tools"
 
   # Example rule 2: Detect potential jailbreak patterns
   - name: "Shadow - Jailbreak detection"
     description: "Demo rule that looks for jailbreak attempts in prompt text"
-    condition:
-      prompt_contains:
-        - "ignore previous instructions"
-        - "bypass security"
-        - "ignore the rules"
-      tool_categories: ["any"]
+    conditions:
+      - type: "prompt_contains"
+        text: "ignore previous instructions"
+        case_sensitive: false
+      - type: "prompt_contains"
+        text: "bypass security"
+        case_sensitive: false
+      - type: "prompt_contains"
+        text: "ignore the rules"
+        case_sensitive: false
     action:
-      block: true
+      deny_tools: ["*"]
       reason: "SHADOW MODE: Potential jailbreak pattern detected in prompt"
       
   # Example rule 3: Progressive risk escalation
   - name: "Shadow - Progressive risk"
     description: "Demo rule that simulates denials on accumulated risk"
-    condition:
-      risk_score_above: 0.5
-      tool_categories: ["any"]
+    conditions:
+      - type: "risk_score"
+        threshold: 0.5
     action:
-      block: true
+      deny_tools: ["file.write", "system.*", "network.*"]
       reason: "SHADOW MODE: Session risk score exceeds threshold"
