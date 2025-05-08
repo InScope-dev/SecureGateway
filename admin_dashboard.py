@@ -5,6 +5,7 @@ Provides the administrative interface for MCP-Sec Gateway
 import os
 import json
 import logging
+from functools import wraps
 from typing import Dict, List, Any, Optional
 
 from flask import Blueprint, request, jsonify, render_template_string
