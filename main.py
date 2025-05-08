@@ -35,6 +35,13 @@ logging.basicConfig(level=logging.INFO,
 # Setup logger for this module
 logger = logging.getLogger(__name__)
 
+# Set environment variables for testing if not set
+if not os.environ.get("BYPASS_MODEL_KEY_CHECK"):
+    os.environ["BYPASS_MODEL_KEY_CHECK"] = "true"
+
+if not os.environ.get("GATEWAY_ID"):
+    os.environ["GATEWAY_ID"] = "mcp-gateway-dev"
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "mcp-sec-insecure-key")
 

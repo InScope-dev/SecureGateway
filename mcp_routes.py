@@ -164,7 +164,8 @@ def prompt():
         
         # Validate model API key - less strict for prompt endpoint
         # but still verify the model exists if API key validation is enabled
-        if not os.environ.get("BYPASS_MODEL_KEY_CHECK"):
+        bypass_check = os.environ.get("BYPASS_MODEL_KEY_CHECK") == "true"
+        if not bypass_check:
             model_key = request.headers.get("X-Model-Key")
             
             # Only verify model exists and key if provided
@@ -246,7 +247,8 @@ def tool_call():
         model_key = request.headers.get("X-Model-Key")
         
         # Special case for testing - if BYPASS_MODEL_KEY_CHECK is set, skip validation
-        if not os.environ.get("BYPASS_MODEL_KEY_CHECK"):
+        bypass_check = os.environ.get("BYPASS_MODEL_KEY_CHECK") == "true"
+        if not bypass_check:
             # If key is missing completely, return 401
             if model_key is None:
                 reason = f"Missing model API key for {model_id}"
