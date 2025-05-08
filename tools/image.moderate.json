@@ -1,0 +1,12 @@
+{
+  "description": "Moderate an image for safe content",
+  "required": [
+    "image_url"
+  ],
+  "properties": {
+    "image_url": {
+      "type": "string",
+      "format": "uri"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Generate a video clip from text prompt",
+  "required": [
+    "prompt",
+    "duration_sec"
+  ],
+  "properties": {
+    "prompt": {
+      "type": "string"
+    },
+    "duration_sec": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 60
+    }
+  }
+}

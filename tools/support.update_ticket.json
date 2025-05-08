@@ -1,0 +1,20 @@
+{
+  "description": "Update support ticket status",
+  "required": [
+    "ticket_id",
+    "status"
+  ],
+  "properties": {
+    "ticket_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "closed",
+        "pending"
+      ]
+    }
+  }
+}

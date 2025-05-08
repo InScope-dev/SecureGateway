@@ -1,0 +1,140 @@
+Unify your existing work
+✅ Add the missing /tools catalog support
+✅ Patch the dashboard to display tool schemas and session risk
+✅ Reformat policies.yaml
+✅ Clean out leftover .new files
+✅ (Optionally) trim unused dependencies from pyproject.toml
+✅ Leave legacy FastAPI/SQLAlchemy files untouched
+
+🧠 Fix‑All Prompt: SecureGateway Phase 4–5 Finalization (Replit)
+🎯 Objective
+Finalize Phase 4–5 implementation of SecureGateway:
+
+Serve 30-tool catalog via /tools API
+
+Add dashboard Tools tab and risk column
+
+Reformat policies.yaml, delete .new files
+
+Trim pyproject.toml (optional)
+
+Leave FastAPI/SQLAlchemy legacy files intact
+
+✅ Step-by-Step Fixes
+1️⃣ Add /tools API to main.py
+Insert below your Flask @app.route(...) definitions:
+
+python
+Copy
+Edit
+from flask import send_from_directory, jsonify
+from pathlib import Path
+
+@app.get("/tools")
+def list_tools():
+    return jsonify([p.stem for p in Path("tools").glob("*.json")])
+
+@app.get("/tools/<name>")
+def get_tool_schema(name):
+    return send_from_directory("tools", f"{name}.json")
+2️⃣ Create or Unzip Tool Catalog
+If not done yet:
+
+bash
+Copy
+Edit
+unzip mcp_tools_catalog.zip -d tools/
+Make sure tools/ contains 30 .json files like calendar.create_event.json, db.write_sensitive.json, etc.
+
+3️⃣ Update Dashboard (DASH_HTML or Jinja)
+Inside your HTML file or inline main.py HTML string:
+
+Add a Tools tab:
+
+html
+Copy
+Edit
+<button onclick="showTab('tools')">Tools</button>
+Add a new section:
+
+html
+Copy
+Edit
+<div id="tools" style="display:none">
+  <h3>Available Tools</h3>
+  <ul id="tool_list"></ul>
+  <pre id="tool_detail"></pre>
+</div>
+JS to load + view tools:
+
+js
+Copy
+Edit
+function loadTools(){
+  fetch("/tools", {headers}).then(r => r.json()).then(tools => {
+    const html = tools.map(t => `<li><a href="#" onclick="viewTool('${t}')">${t}</a></li>`).join("");
+    document.getElementById("tool_list").innerHTML = html;
+  });
+}
+function viewTool(name){
+  fetch(`/tools/${name}`, {headers})
+    .then(r => r.json()).then(data => {
+      document.getElementById("tool_detail").innerText = JSON.stringify(data, null, 2);
+    });
+}
+Call loadTools() on login or tab switch.
+
+4️⃣ Add Session Risk Score to Table
+In dashboard log table:
+
+html
+Copy
+Edit
+<th>Risk</th>
+...
+<td>${(l.risk_score || 0).toFixed(2)}</td>
+5️⃣ Reformat policies.yaml
+Replace contents of policies.yaml with:
+
+yaml
+Copy
+Edit
+rules:
+  - model: "gpt-4*"
+    allow_tools: ["calendar.*", "search.*"]
+    deny_tools:  ["db.write_sensitive"]
+    max_calls_per_session: 5
+    active_hours: "08:00-18:00"
+Then delete policies.yaml.new.
+
+6️⃣ Delete .new Files (Audit, RateLimiter, SchemaValidator)
+bash
+Copy
+Edit
+rm audit_logger.py.new rate_limiter.py.new schema_validator.py.new policies.yaml.new
+7️⃣ (Optional) Trim Dependencies
+Open pyproject.toml → remove:
+
+toml
+Copy
+Edit
+"fastapi",
+"sqlalchemy",
+"uvicorn",
+Keep only:
+
+toml
+Copy
+Edit
+"flask",
+"pyyaml",
+"jsonschema",
+"requests",
+"python-dotenv",
+✅ Final Step: Commit & Push
+bash
+Copy
+Edit
+git add tools/ main.py mcp_routes.py policies.yaml pyproject.toml
+git commit -m "fix: finalize Phase 4–5 (tools tab, risk score, policy YAML cleanup)"
+git push origin main

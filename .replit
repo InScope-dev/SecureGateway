@@ -2,7 +2,7 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["libxcrypt", "libyaml", "openssl", "postgresql", "jq"]
+packages = ["libxcrypt", "libyaml", "openssl", "postgresql", "jq", "unzip"]
 
 [deployment]
 deploymentTarget = "autoscale"

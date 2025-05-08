@@ -1,0 +1,16 @@
+{
+  "description": "Create HR candidate profile",
+  "required": [
+    "name",
+    "email"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string",
+      "format": "email"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "description": "Create a payment invoice",
+  "required": [
+    "amount",
+    "currency"
+  ],
+  "properties": {
+    "amount": {
+      "type": "number"
+    },
+    "currency": {
+      "type": "string"
+    },
+    "due_date": {
+      "type": "string",
+      "format": "date"
+    }
+  }
+}

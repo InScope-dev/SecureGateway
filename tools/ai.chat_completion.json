@@ -1,0 +1,26 @@
+{
+  "description": "Call an LLM chat completion endpoint",
+  "required": [
+    "messages"
+  ],
+  "properties": {
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

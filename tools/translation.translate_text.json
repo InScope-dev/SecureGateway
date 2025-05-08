@@ -1,0 +1,15 @@
+{
+  "description": "Translate text to a target language",
+  "required": [
+    "text",
+    "target_lang"
+  ],
+  "properties": {
+    "text": {
+      "type": "string"
+    },
+    "target_lang": {
+      "type": "string"
+    }
+  }
+}

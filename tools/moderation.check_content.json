@@ -1,0 +1,11 @@
+{
+  "description": "Check text for policy violations",
+  "required": [
+    "text"
+  ],
+  "properties": {
+    "text": {
+      "type": "string"
+    }
+  }
+}

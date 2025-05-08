@@ -1,0 +1,15 @@
+{
+  "description": "Create support ticket",
+  "required": [
+    "subject",
+    "description"
+  ],
+  "properties": {
+    "subject": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "Read data from database",
+  "required": [
+    "collection",
+    "query"
+  ],
+  "properties": {
+    "collection": {
+      "type": "string"
+    },
+    "query": {
+      "type": "object"
+    }
+  }
+}

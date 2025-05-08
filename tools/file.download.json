@@ -1,0 +1,11 @@
+{
+  "description": "Download a file",
+  "required": [
+    "file_id"
+  ],
+  "properties": {
+    "file_id": {
+      "type": "string"
+    }
+  }
+}

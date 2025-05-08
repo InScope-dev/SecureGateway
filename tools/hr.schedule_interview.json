@@ -1,0 +1,16 @@
+{
+  "description": "Schedule candidate interview",
+  "required": [
+    "candidate_id",
+    "date_time"
+  ],
+  "properties": {
+    "candidate_id": {
+      "type": "string"
+    },
+    "date_time": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

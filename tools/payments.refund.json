@@ -1,0 +1,15 @@
+{
+  "description": "Issue a refund",
+  "required": [
+    "invoice_id",
+    "amount"
+  ],
+  "properties": {
+    "invoice_id": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "number"
+    }
+  }
+}

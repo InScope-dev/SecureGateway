@@ -1,0 +1,23 @@
+{
+  "description": "Create a calendar event",
+  "required": [
+    "title",
+    "start_time"
+  ],
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "start_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "end_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "location": {
+      "type": "string"
+    }
+  }
+}

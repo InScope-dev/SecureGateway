@@ -1,0 +1,15 @@
+{
+  "description": "Calculate return on investment",
+  "required": [
+    "initial_investment",
+    "final_value"
+  ],
+  "properties": {
+    "initial_investment": {
+      "type": "number"
+    },
+    "final_value": {
+      "type": "number"
+    }
+  }
+}

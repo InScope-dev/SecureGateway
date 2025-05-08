@@ -1,0 +1,11 @@
+{
+  "description": "Get current weather for a location",
+  "required": [
+    "location"
+  ],
+  "properties": {
+    "location": {
+      "type": "string"
+    }
+  }
+}

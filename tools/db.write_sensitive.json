@@ -1,0 +1,15 @@
+{
+  "description": "Write sensitive data to database",
+  "required": [
+    "collection",
+    "data"
+  ],
+  "properties": {
+    "collection": {
+      "type": "string"
+    },
+    "data": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "description": "List events between two dates",
+  "required": [
+    "start_date",
+    "end_date"
+  ],
+  "properties": {
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date"
+    }
+  }
+}

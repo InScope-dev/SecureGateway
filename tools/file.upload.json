@@ -1,0 +1,15 @@
+{
+  "description": "Upload a file",
+  "required": [
+    "filename",
+    "content_base64"
+  ],
+  "properties": {
+    "filename": {
+      "type": "string"
+    },
+    "content_base64": {
+      "type": "string"
+    }
+  }
+}

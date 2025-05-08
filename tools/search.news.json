@@ -1,0 +1,19 @@
+{
+  "description": "News search query",
+  "required": [
+    "query"
+  ],
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "from_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "to_date": {
+      "type": "string",
+      "format": "date"
+    }
+  }
+}

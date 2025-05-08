@@ -1,0 +1,12 @@
+{
+  "description": "Transcribe video audio",
+  "required": [
+    "video_url"
+  ],
+  "properties": {
+    "video_url": {
+      "type": "string",
+      "format": "uri"
+    }
+  }
+}

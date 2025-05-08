@@ -1,0 +1,15 @@
+{
+  "description": "Send a Slack message",
+  "required": [
+    "channel",
+    "text"
+  ],
+  "properties": {
+    "channel": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  }
+}

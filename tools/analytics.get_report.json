@@ -1,0 +1,11 @@
+{
+  "description": "Get analytics report",
+  "required": [
+    "report_id"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string"
+    }
+  }
+}

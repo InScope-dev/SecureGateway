@@ -1,0 +1,15 @@
+{
+  "description": "Get FX rate for currency pair",
+  "required": [
+    "base_currency",
+    "quote_currency"
+  ],
+  "properties": {
+    "base_currency": {
+      "type": "string"
+    },
+    "quote_currency": {
+      "type": "string"
+    }
+  }
+}

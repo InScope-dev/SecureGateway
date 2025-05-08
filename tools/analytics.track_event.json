@@ -1,0 +1,14 @@
+{
+  "description": "Track analytics event",
+  "required": [
+    "event_name"
+  ],
+  "properties": {
+    "event_name": {
+      "type": "string"
+    },
+    "properties": {
+      "type": "object"
+    }
+  }
+}

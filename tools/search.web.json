@@ -1,0 +1,16 @@
+{
+  "description": "Web search query",
+  "required": [
+    "query"
+  ],
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "num_results": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    }
+  }
+}

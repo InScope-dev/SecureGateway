@@ -1,0 +1,11 @@
+{
+  "description": "Generate embeddings for text",
+  "required": [
+    "text"
+  ],
+  "properties": {
+    "text": {
+      "type": "string"
+    }
+  }
+}
