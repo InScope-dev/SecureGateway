@@ -46,6 +46,18 @@ if not os.environ.get("GATEWAY_ID"):
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "mcp-sec-insecure-key")
 
+# Initialize login manager
+from flask_login import LoginManager
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'auth.login'
+
+# Validate policies on startup
+if not policy_validator.validate_policies_on_startup():
+    logger.error("Policy validation failed. Server will continue but may encounter issues.")
+else:
+    logger.info("All policies validated successfully.")
+
 # Import blueprints
 try:
     from admin_dashboard import admin_bp
@@ -53,6 +65,14 @@ try:
     logger.info("Loaded admin dashboard blueprint")
 except ImportError:
     logger.warning("Admin dashboard module not available")
+
+# Import auth blueprint
+try:
+    from auth import auth_bp
+    app.register_blueprint(auth_bp, url_prefix='')
+    logger.info("Loaded authentication blueprint")
+except ImportError:
+    logger.warning("Authentication module not available")
 
 # Configuration defaults
 config = {

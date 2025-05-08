@@ -46,7 +46,7 @@ def validate_policy(policy_path: str, schema_path: str) -> Tuple[bool, Optional[
         return False, f"YAML parsing error in {policy_path}: {str(e)}"
     except json.JSONDecodeError as e:
         return False, f"JSON parsing error in {schema_path}: {str(e)}"
-    except jsonschema.exceptions.ValidationError as e:
+    except jsonschema.ValidationError as e:
         return False, f"Policy validation error: {e.message}"
     except Exception as e:
         return False, f"Unexpected error validating policy: {str(e)}"

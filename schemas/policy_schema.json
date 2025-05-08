@@ -1,69 +1,106 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["rules"],
+  "required": ["name", "version", "allow_tools"],
   "properties": {
-    "rules": {
+    "name": {
+      "type": "string",
+      "description": "Name of the policy"
+    },
+    "version": {
+      "type": "string",
+      "description": "Version of the policy"
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional description of the policy"
+    },
+    "allow_models": {
       "type": "array",
+      "description": "List of models that are allowed to use tools",
       "items": {
-        "type": "object",
-        "required": ["name", "allow_tools"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Name of the policy rule"
-          },
-          "description": {
-            "type": "string",
-            "description": "Description of what this rule controls"
-          },
-          "model_patterns": {
-            "type": "array",
-            "items": {
-              "type": "string"
+        "type": "string"
+      }
+    },
+    "allow_tools": {
+      "type": "array",
+      "description": "List of tool patterns that are allowed",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deny_tools": {
+      "type": "array",
+      "description": "List of tool patterns that are explicitly denied",
+      "items": {
+        "type": "string"
+      }
+    },
+    "model_tool_map": {
+      "type": "object",
+      "description": "Map of models to specific allowed tools",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "rate_limits": {
+      "type": "object",
+      "description": "Rate limiting configuration",
+      "properties": {
+        "default": {
+          "type": "object",
+          "properties": {
+            "calls_per_minute": {
+              "type": "integer",
+              "minimum": 1
             },
-            "description": "List of model ID patterns this rule applies to (supports wildcards)"
-          },
-          "allow_tools": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of tools allowed by this rule (supports wildcards)"
-          },
-          "max_calls_per_session": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Maximum number of tool calls per session"
-          },
-          "max_calls_per_minute": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Maximum number of tool calls per minute"
-          },
-          "active_hours": {
-            "type": "string",
-            "pattern": "^[0-9]{1,2}:[0-9]{2}-[0-9]{1,2}:[0-9]{2}$",
-            "description": "Time range when this rule is active, in format HH:MM-HH:MM"
+            "burst": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "calls_per_minute": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "burst": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "models": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "calls_per_minute": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "burst": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
           }
         }
       }
     },
-    "comments": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "Optional comments about this policy file"
-    },
-    "created_at": {
-      "type": "string",
-      "format": "date-time",
-      "description": "Timestamp when this policy was created"
-    },
-    "version": {
-      "type": "string",
-      "description": "Version identifier for this policy"
+    "max_token_context": {
+      "type": "integer",
+      "description": "Maximum token context for prompts and history",
+      "minimum": 1
     }
   }
 }

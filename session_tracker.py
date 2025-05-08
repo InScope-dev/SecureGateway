@@ -158,9 +158,9 @@ def init_session(session_id, model_id, prompt=""):
     }
     logger.debug(f"Session {session_id} initialized for model {model_id}")
 
-def update_tool_call(session_id, tool_name, input_data, status, output=None, reason=None):
+def _update_tool_call_impl(session_id, tool_name, input_data, status, output=None, reason=None):
     """
-    Record a tool call in the session history
+    Internal implementation of record tool call in the session history
     
     Args:
         session_id: Session identifier
@@ -499,10 +499,11 @@ def maybe_save_sessions():
     if REQUEST_COUNT % SESSION_SAVE_INTERVAL == 0:
         save_sessions_to_disk()
         
-# Update the update_tool_call function to trigger periodic saves
+# Define the main update_tool_call function that uses the internal implementation
+# and adds session persistence
 def update_tool_call(session_id, tool_name, input_data, status, output=None, reason=None):
     """
-    Record a tool call in the session history
+    Record a tool call in the session history and trigger periodic saves
     
     Args:
         session_id: Session identifier
@@ -512,19 +513,8 @@ def update_tool_call(session_id, tool_name, input_data, status, output=None, rea
         output: Optional tool result
         reason: Optional reason for denial or error
     """
-    if session_id not in SESSION_STATE:
-        logger.warning(f"Attempt to update non-existent session: {session_id}")
-        return
-        
-    SESSION_STATE[session_id]["tool_calls"].append({
-        "tool": tool_name,
-        "input": input_data,
-        "output": output,
-        "status": status,
-        "reason": reason,
-        "timestamp": time.time()
-    })
-    logger.debug(f"Session {session_id} updated: {tool_name} call with status {status}")
+    # Use the internal implementation
+    _update_tool_call_impl(session_id, tool_name, input_data, status, output, reason)
     
     # Maybe save sessions to disk based on request count
     maybe_save_sessions()
