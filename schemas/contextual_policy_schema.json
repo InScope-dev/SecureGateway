@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["rules"],
+  "properties": {
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "description"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the contextual policy rule"
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of what this rule controls"
+          },
+          "when_tool": {
+            "type": "string",
+            "description": "Tool pattern this rule applies to (supports wildcards)"
+          },
+          "block_if_prompt_contains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of phrases that, if found in the prompt, will cause the rule to block"
+          },
+          "block_if_previous_denials": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Block if this many previous denials have occurred in the session"
+          },
+          "require_prior_successful_tool": {
+            "type": "string",
+            "description": "Require this tool to have been successfully used earlier in the session"
+          },
+          "max_calls_per_session": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of calls for this tool per session"
+          },
+          "max_calls_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of calls for this tool per minute"
+          },
+          "block_if_session_risk_above": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Block if the session risk score is above this threshold (0.0-1.0)"
+          }
+        }
+      }
+    },
+    "shadow_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "description", "condition", "action"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the shadow rule"
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of what this shadow rule checks"
+          },
+          "condition": {
+            "type": "object",
+            "properties": {
+              "tool_categories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tool categories this rule applies to"
+              },
+              "prior_tools_count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Minimum number of prior tools used in session"
+              },
+              "prompt_contains": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of phrases to check in the prompt"
+              },
+              "risk_score_above": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Risk score threshold (0.0-1.0)"
+              }
+            }
+          },
+          "action": {
+            "type": "object",
+            "required": ["block"],
+            "properties": {
+              "block": {
+                "type": "boolean",
+                "description": "Whether this rule would block the call"
+              },
+              "reason": {
+                "type": "string",
+                "description": "Explanation of why the rule would block"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
