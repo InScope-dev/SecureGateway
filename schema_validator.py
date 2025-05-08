@@ -10,13 +10,24 @@ import logging
 import jsonschema
 from typing import Dict, Any, Union, Optional
 
-# Import tools catalog module
+# Create a fallback catalog module
+class FallbackCatalog:
+    def load_schema(self, tool_name: str, schema_type: str) -> Optional[Dict[str, Any]]:
+        return None
+    
+    def clear_cache(self) -> None:
+        pass
+
+# Set up catalog integration
+catalog = FallbackCatalog()
+USE_CATALOG = False
+
+# Try to import tools catalog
 try:
-    from tools_catalog.catalog import load_schema as catalog_load_schema, clear_cache as catalog_clear_cache
+    from tools_catalog import catalog
     USE_CATALOG = True
 except ImportError:
-    USE_CATALOG = False
-    # Handle fallback if tools catalog is not available
+    # Module not available
     pass
 
 # Setup logging
@@ -43,7 +54,7 @@ def _load_schema(tool_name: str, schema_type: str = "input") -> Optional[Dict[st
     # Try to load from tools catalog first
     if USE_CATALOG:
         try:
-            schema = catalog_load_schema(tool_name, schema_type)
+            schema = catalog.load_schema(tool_name, schema_type)
             if schema:
                 return schema
             # If not found, fall back to legacy method
@@ -147,7 +158,7 @@ def reload_schemas() -> None:
     # Clear catalog cache if using the tools catalog
     if USE_CATALOG:
         try:
-            catalog_clear_cache()
+            catalog.clear_cache()
             logger.info("Tools catalog cache cleared")
         except Exception as e:
             logger.error(f"Error clearing tools catalog cache: {str(e)}")
