@@ -1779,6 +1779,91 @@ def dash():
             });
     }
     
+    // Function to load tools catalog
+    function loadToolsCatalog() {
+        const toolList = document.getElementById('tool_list');
+        const toolDetail = document.getElementById('tool_detail');
+        
+        fetch('/tools')
+            .then(response => response.json())
+            .then(data => {
+                // Clear loading spinner
+                toolList.innerHTML = '';
+                
+                if (!data.tools || data.tools.length === 0) {
+                    toolList.innerHTML = '<div class="alert alert-info">No tools found in catalog</div>';
+                    return;
+                }
+                
+                // Sort tools by name
+                data.tools.sort();
+                
+                // Create list items for each tool
+                data.tools.forEach(toolName => {
+                    const listItem = document.createElement('a');
+                    listItem.href = '#';
+                    listItem.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+                    listItem.textContent = toolName;
+                    
+                    // Add risk badge based on tool name pattern matching
+                    // This will be replaced with actual risk data from tool metadata once available
+                    let riskBadge = '';
+                    if (toolName.includes('file') || toolName.includes('exec') || toolName.includes('admin')) {
+                        riskBadge = '<span class="badge bg-danger">High Risk</span>';
+                    } else if (toolName.includes('write') || toolName.includes('delete') || toolName.includes('update')) {
+                        riskBadge = '<span class="badge bg-warning text-dark">Medium Risk</span>';
+                    } else {
+                        riskBadge = '<span class="badge bg-success">Low Risk</span>';
+                    }
+                    
+                    // Add the risk badge to the list item
+                    listItem.innerHTML += riskBadge;
+                    
+                    // Add click event to load tool details
+                    listItem.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        
+                        // Highlight the selected tool
+                        document.querySelectorAll('#tool_list a').forEach(item => {
+                            item.classList.remove('active');
+                        });
+                        this.classList.add('active');
+                        
+                        // Load and display tool details
+                        loadToolDetails(toolName);
+                    });
+                    
+                    toolList.appendChild(listItem);
+                });
+            })
+            .catch(error => {
+                toolList.innerHTML = `<div class="alert alert-danger">Error loading tools: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to load details for a specific tool
+    function loadToolDetails(toolName) {
+        const toolDetail = document.getElementById('tool_detail');
+        
+        // Show loading indicator
+        toolDetail.textContent = 'Loading tool details...';
+        
+        fetch('/tools/' + toolName)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    toolDetail.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                
+                // Format and display the tool details
+                toolDetail.textContent = JSON.stringify(data, null, 2);
+            })
+            .catch(error => {
+                toolDetail.textContent = 'Error loading tool details: ' + error.message;
+            });
+    }
+    
     // Function to submit a policy proposal
     function submitPolicyProposal() {
         const editor = document.getElementById('policyProposalEditor');
