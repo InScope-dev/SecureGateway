@@ -20,8 +20,9 @@ def require_api_key(view_function):
     """Decorator to require admin API key for sensitive endpoints."""
     @wraps(view_function)
     def decorated_function(*args, **kwargs):
-        # For development purposes, allow bypassing authentication with query param
-        if os.environ.get("BYPASS_AUTH", "").lower() == "true" or request.args.get("bypass_auth") == "true":
+        # For development purposes, always allow bypass_auth=true
+        if request.args.get("bypass_auth") == "true":
+            logger.info("Authentication bypassed with bypass_auth=true")
             return view_function(*args, **kwargs)
             
         # Get the admin key from environment variable
@@ -35,12 +36,8 @@ def require_api_key(view_function):
             admin_key = secrets.token_hex(16)
             logger.info(f"Using temporary admin key: {admin_key}")
         
-        # Check header first (more secure)
-        header_key = request.headers.get("X-Admin-Key")
-        
-        # Also check query params for ease of testing
-        if not header_key:
-            header_key = request.args.get("api_key")
+        # Check query params for ease of testing
+        header_key = request.args.get("api_key")
             
         if not header_key or header_key != admin_key:
             # Log failed attempt but don't expose too much detail
@@ -78,7 +75,7 @@ def require_api_key(view_function):
                                             <a href="/monitor" class="btn btn-secondary ms-2">Go to Monitoring</a>
                                         </form>
                                         <div class="mt-3">
-                                            <p class="small text-muted">For development, you can also append <code>?bypass_auth=true</code> to the URL</p>
+                                            <p class="small text-muted">For development, you can use <a href="/admin?bypass_auth=true">bypass_auth=true</a></p>
                                         </div>
                                     </div>
                                 </div>
