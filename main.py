@@ -1450,6 +1450,543 @@ def admin():
             </div>
         </div>""")
     
+    # Logs table
+    logs_table = """
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Detailed Audit Logs</h5>
+                        <div>
+                            <a href="/api/logs/export" class="btn btn-sm btn-outline-secondary">Export CSV</a>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Model</th>
+                                        <th>Tool</th>
+                                        <th>Status</th>
+                                        <th>Reason & Explanations</th>
+                                        <th>Response Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>"""
+    
+    if formatted_logs:
+        for log in formatted_logs:
+            logs_table += f"""
+                                    <tr class="status-{log['status']}">
+                                        <td>{log['timestamp']}</td>
+                                        <td>{log['model_id']}</td>
+                                        <td>{log['tool']}</td>
+                                        <td>{log['status']}</td>
+                                        <td>
+                                            <div>{log['reason'] or ''}</div>
+                                            {f'<div class="mt-1 small text-muted"><strong>Reasoning:</strong> {"<br>".join(log["reasoning"]) if isinstance(log.get("reasoning"), list) else ""}</div>' if log.get('reasoning') else ''}
+                                            {f'<div class="mt-1 small text-muted"><strong>Rules:</strong> {", ".join(log["rule_trace"]) if isinstance(log.get("rule_trace"), list) else ""}</div>' if log.get('rule_trace') else ''}
+                                        </td>
+                                        <td>{f"{log['latency_ms']}ms" if log.get('latency_ms') else '-'}</td>
+                                    </tr>"""
+    else:
+        logs_table += """
+                                    <tr><td colspan="6" class="text-center py-3">No audit logs found</td></tr>"""
+        
+    logs_table += """
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>"""
+    
+    html_parts.append(logs_table)
+    
+    # Tools catalog section
+    tools_section = """
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Tools Catalog</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="list-group" id="tool_list">
+                                    <div class="d-flex justify-content-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <pre id="tool_detail" class="p-3 bg-dark text-light rounded" style="min-height: 200px;">Select a tool to view details</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>"""
+    
+    html_parts.append(tools_section)
+    
+    # Policy management and schema validation
+    html_parts.append("""
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Policy Management</h5>
+                        <div>
+                            <form method="POST" action="/api/policy/reload" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-success">Reload Policies</button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <p class="mb-0">Policy configuration is available via the API:</p>
+                            <ul class="mb-0">
+                                <li>View policies: <code>/api/policy</code></li>
+                                <li>Reload policies: <code>/api/policy/reload</code> (POST)</li>
+                                <li>View history: <code>/api/policy/history</code></li>
+                                <li>Rollback: <code>/api/policy/rollback/{timestamp}</code> (POST)</li>
+                                <li>Propose changes: <code>/api/propose_policy</code> (POST)</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <h6 class="border-bottom pb-2 mb-3">Policy Versioning</h6>
+                            <div id="policyHistory">
+                                <div class="text-center">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="ms-2">Loading policy history...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Schema Management</h5>
+                        <form method="POST" action="/api/schema/reload">
+                            <button type="submit" class="btn btn-sm btn-success">Reload Schemas</button>
+                        </form>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <p class="mb-0">Schema validation ensures all API requests meet required formats.</p>
+                            <p class="mb-0 mt-2">Reload schemas after making changes to schema definitions.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Shadow Policy Management</h5>
+                        <div class="d-flex gap-2">
+                            <button id="loadShadowPolicy" class="btn btn-sm btn-secondary">Load Current</button>
+                            <button id="saveShadowPolicy" class="btn btn-sm btn-success">Save Changes</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <p class="mb-0"><strong>Shadow Mode Policies</strong> allow you to test new policy rules without enforcing them. These policies are evaluated but not enforced, letting you collect metrics and analyze the potential impact before activating them.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="shadowPolicyEditor" class="form-label">Shadow Policy Configuration (YAML):</label>
+                            <textarea id="shadowPolicyEditor" class="form-control font-monospace" rows="12" style="font-size: 0.875rem;"></textarea>
+                        </div>
+                        <div id="shadowPolicyStatus" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Session Inspector</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="sessionForm" class="row g-3">
+                            <div class="col-md-8">
+                                <input type="text" class="form-control" id="sessionId" placeholder="Enter Session ID">
+                            </div>
+                            <div class="col-md-4">
+                                <button type="submit" class="btn btn-primary w-100">View Session</button>
+                            </div>
+                        </form>
+                        <div id="sessionDetails" class="mt-3" style="display:none;">
+                            <h6 class="border-bottom pb-2 mb-3">Session Details</h6>
+                            <pre id="sessionJson" class="bg-dark p-3 rounded" style="max-height: 300px; overflow-y: auto;"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Multi-Project Management</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info mb-3">
+                            <p class="mb-0">MCP-Sec now supports multiple projects with per-project policies.</p>
+                            <p class="mb-0 mt-2">Create project-specific policies in <code>policies/{project_id}.yaml</code>.</p>
+                        </div>
+                        
+                        <form id="projectSwitcher" class="row g-3">
+                            <div class="col-md-8">
+                                <select class="form-select" id="projectId">
+                                    <option value="default">default</option>
+                                    <!-- Projects will be loaded dynamically -->
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="submit" class="btn btn-primary w-100">Switch Project</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>""")
+    
+    # JavaScript
+    html_parts.append("""
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Shadow policy handlers
+        document.getElementById('loadShadowPolicy').addEventListener('click', loadShadowPolicy);
+        document.getElementById('saveShadowPolicy').addEventListener('click', saveShadowPolicy);
+        
+        // Initial shadow policy load
+        loadShadowPolicy();
+        
+        // Load policy history
+        loadPolicyHistory();
+        
+        // Load project list
+        loadProjects();
+        
+        // Load tools catalog
+        loadToolsCatalog();
+        
+        // Session inspector form handler
+        document.getElementById('sessionForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const sessionId = document.getElementById('sessionId').value.trim();
+            if (!sessionId) return;
+            
+            fetch('/api/session/' + sessionId)
+                .then(response => response.json())
+                .then(data => {
+                    const sessionDetails = document.getElementById('sessionDetails');
+                    const sessionJson = document.getElementById('sessionJson');
+                    sessionJson.textContent = JSON.stringify(data, null, 2);
+                    sessionDetails.style.display = 'block';
+                })
+                .catch(error => {
+                    alert('Error loading session: ' + error);
+                });
+        });
+    });
+    
+    // Function to load policy history
+    function loadPolicyHistory() {
+        const historyDiv = document.getElementById('policyHistory');
+        
+        fetch('/api/policy/history')
+            .then(response => response.json())
+            .then(data => {
+                if (!data.history || data.history.length === 0) {
+                    historyDiv.innerHTML = '<div class="alert alert-info">No policy history found.</div>';
+                    return;
+                }
+                
+                // Create history table
+                let tableHtml = `
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Date/Time</th>
+                                <th>Policy File</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                
+                // Add rows for each history item
+                data.history.forEach(item => {
+                    tableHtml += `
+                    <tr>
+                        <td>${item.datetime}</td>
+                        <td>${item.filename}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-warning rollback-btn" 
+                                    data-timestamp="${item.timestamp}"
+                                    onclick="rollbackPolicy(${item.timestamp})">
+                                Rollback
+                            </button>
+                        </td>
+                    </tr>`;
+                });
+                
+                tableHtml += `
+                        </tbody>
+                    </table>
+                </div>`;
+                
+                historyDiv.innerHTML = tableHtml;
+            })
+            .catch(error => {
+                historyDiv.innerHTML = `<div class="alert alert-danger">Error loading policy history: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to load projects
+    function loadProjects() {
+        const selectElement = document.getElementById('projectId');
+        
+        fetch('/api/projects')
+            .catch(() => {
+                // If API not implemented yet, we'll just use default
+                console.log('Project API not implemented yet');
+                return { projects: ['default'] };
+            })
+            .then(response => {
+                if (response.projects) return response;
+                return response.json();
+            })
+            .then(data => {
+                // Clear options except default
+                while (selectElement.options.length > 1) {
+                    selectElement.remove(1);
+                }
+                
+                // Add options for each project
+                if (data.projects) {
+                    data.projects.forEach(project => {
+                        if (project === 'default') return; // Skip default which is already there
+                        
+                        const option = document.createElement('option');
+                        option.value = project;
+                        option.text = project;
+                        selectElement.add(option);
+                    });
+                }
+                
+                // Set current project based on URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const currentProject = urlParams.get('project');
+                if (currentProject) {
+                    selectElement.value = currentProject;
+                }
+            });
+    }
+    
+    // Function to rollback to a policy version
+    function rollbackPolicy(timestamp) {
+        if (!confirm('Are you sure you want to rollback to this policy version? This will overwrite the current policy file.')) {
+            return;
+        }
+        
+        fetch('/api/policy/rollback/' + timestamp, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert('Policy rolled back successfully: ' + data.message);
+                // Reload the page to reflect the changes
+                window.location.reload();
+            } else {
+                alert('Error rolling back policy: ' + (data.error || data.message || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error rolling back policy: ' + error.message);
+        });
+    }
+    
+    // Function to load shadow policy
+    function loadShadowPolicy() {
+        const editor = document.getElementById('shadowPolicyEditor');
+        const statusDiv = document.getElementById('shadowPolicyStatus');
+        
+        statusDiv.innerHTML = '<div class="alert alert-info">Loading shadow policy...</div>';
+        
+        fetch('/api/shadow_policy')
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    statusDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                
+                // Show the policy in the editor
+                editor.value = data.shadow_policy_yaml || '';
+                
+                if (data.message) {
+                    statusDiv.innerHTML = `<div class="alert alert-info">${data.message}</div>`;
+                } else {
+                    statusDiv.innerHTML = `<div class="alert alert-success">Shadow policy loaded successfully!</div>`;
+                    
+                    // Auto-hide the status after 3 seconds
+                    setTimeout(() => {
+                        statusDiv.innerHTML = '';
+                    }, 3000);
+                }
+            })
+            .catch(error => {
+                statusDiv.innerHTML = `<div class="alert alert-danger">Error loading shadow policy: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to save shadow policy
+    function saveShadowPolicy() {
+        const editor = document.getElementById('shadowPolicyEditor');
+        const statusDiv = document.getElementById('shadowPolicyStatus');
+        const policyYaml = editor.value.trim();
+        
+        if (!policyYaml) {
+            statusDiv.innerHTML = '<div class="alert alert-warning">Cannot save empty policy</div>';
+            return;
+        }
+        
+        statusDiv.innerHTML = '<div class="alert alert-info">Saving shadow policy...</div>';
+        
+        fetch('/api/shadow_policy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                shadow_policy_yaml: policyYaml
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    statusDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                
+                statusDiv.innerHTML = '<div class="alert alert-success">Shadow policy saved successfully! It will be used for shadow simulation but will not affect actual policy decisions.</div>';
+            })
+            .catch(error => {
+                statusDiv.innerHTML = `<div class="alert alert-danger">Error saving shadow policy: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to load tools catalog
+    function loadToolsCatalog() {
+        const toolList = document.getElementById('tool_list');
+        const toolDetail = document.getElementById('tool_detail');
+        
+        fetch('/tools')
+            .then(response => response.json())
+            .then(data => {
+                // Clear loading spinner
+                toolList.innerHTML = '';
+                
+                if (!data.tools || data.tools.length === 0) {
+                    toolList.innerHTML = '<div class="alert alert-info">No tools found in catalog</div>';
+                    return;
+                }
+                
+                // Sort tools by name
+                data.tools.sort();
+                
+                // Create list items for each tool
+                data.tools.forEach(toolName => {
+                    const listItem = document.createElement('a');
+                    listItem.href = '#';
+                    listItem.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+                    listItem.textContent = toolName;
+                    
+                    // Add risk badge based on tool name pattern matching
+                    // This will be replaced with actual risk data from tool metadata once available
+                    let riskBadge = '';
+                    if (toolName.includes('file') || toolName.includes('exec') || toolName.includes('admin')) {
+                        riskBadge = '<span class="badge bg-danger">High Risk</span>';
+                    } else if (toolName.includes('write') || toolName.includes('delete') || toolName.includes('update')) {
+                        riskBadge = '<span class="badge bg-warning text-dark">Medium Risk</span>';
+                    } else {
+                        riskBadge = '<span class="badge bg-success">Low Risk</span>';
+                    }
+                    
+                    // Add the risk badge to the list item
+                    listItem.innerHTML += riskBadge;
+                    
+                    // Add click event to load tool details
+                    listItem.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        
+                        // Highlight the selected tool
+                        document.querySelectorAll('#tool_list a').forEach(item => {
+                            item.classList.remove('active');
+                        });
+                        this.classList.add('active');
+                        
+                        // Load and display tool details
+                        loadToolDetails(toolName);
+                    });
+                    
+                    toolList.appendChild(listItem);
+                });
+            })
+            .catch(error => {
+                toolList.innerHTML = `<div class="alert alert-danger">Error loading tools: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to load details for a specific tool
+    function loadToolDetails(toolName) {
+        const toolDetail = document.getElementById('tool_detail');
+        
+        // Show loading indicator
+        toolDetail.textContent = 'Loading tool details...';
+        
+        fetch('/tools/' + toolName)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    toolDetail.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                
+                // Format and display the tool details
+                toolDetail.textContent = JSON.stringify(data, null, 2);
+            })
+            .catch(error => {
+                toolDetail.textContent = 'Error loading tool details: ' + error.message;
+            });
+    }
+    </script>
+    </body>
+    </html>""")
+    
+    # Join all parts
+    return "".join(html_parts)
+    
     # Get metrics
     total_requests = len(logs)
     allowed = len([log for log in logs if log.get("status") == "allowed"])
