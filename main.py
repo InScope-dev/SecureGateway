@@ -2071,6 +2071,19 @@ def federation_forward():
             "reason": f"Remote gateway error: {str(e)}"
         }), 500
 
+# Tools catalog API endpoints
+@app.route("/tools")
+def list_tools():
+    """List all available tools in the catalog"""
+    from pathlib import Path
+    return jsonify([p.stem for p in Path("tools").glob("*.json")])
+
+@app.route("/tools/<name>")
+def get_tool_schema(name):
+    """Get the schema for a specific tool"""
+    from flask import send_from_directory
+    return send_from_directory("tools", f"{name}.json")
+
 # Register the MCP routes
 app.register_blueprint(mcp_routes.mcp_bp)
 
