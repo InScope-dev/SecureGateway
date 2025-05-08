@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["query"],
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "The search query to execute",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum number of results to return",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 10
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Number of results to skip",
+      "minimum": 0,
+      "default": 0
+    }
+  },
+  "additionalProperties": false
+}

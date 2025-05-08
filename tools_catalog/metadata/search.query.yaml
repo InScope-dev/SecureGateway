@@ -1,0 +1,21 @@
+name: search.query
+description: Search for information across the web
+risk_level: low
+risk_categories:
+  - data_access
+  - external_service
+permission_level: standard
+required_api_key: false
+max_rate_per_minute: 10
+max_requests_per_session: 50
+documentation: |
+  This tool allows models to search for information across the web.
+  It returns a list of search results with titles, snippets, and URLs.
+  
+  Example:
+  ```
+  {
+    "query": "latest AI research papers",
+    "limit": 5
+  }
+  ```

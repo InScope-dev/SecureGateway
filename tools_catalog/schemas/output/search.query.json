@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["results", "count"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "description": "The search results",
+      "items": {
+        "type": "object",
+        "required": ["title", "snippet", "url"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the search result"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "A snippet or summary of the search result"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL of the search result",
+            "format": "uri"
+          }
+        }
+      }
+    },
+    "count": {
+      "type": "integer",
+      "description": "Total number of results available",
+      "minimum": 0
+    },
+    "next_offset": {
+      "type": "integer",
+      "description": "Offset for the next page of results",
+      "minimum": 0
+    }
+  }
+}

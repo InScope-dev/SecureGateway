@@ -1,0 +1,22 @@
+name: calendar
+description: Calendar tools for managing events and appointments
+risk_level: medium
+risk_categories:
+  - data_modification
+  - external_service
+  - sensitive_data
+permission_level: elevated
+required_api_key: true
+max_rate_per_minute: 5
+max_requests_per_session: 20
+documentation: |
+  Calendar tools for managing events and appointments.
+  These tools can create, read, update, and delete calendar events.
+  They require authentication and have elevated permission level due to
+  potential access to sensitive information and scheduling capabilities.
+  
+  Available operations:
+  - calendar.create - Create a new calendar event
+  - calendar.list - List calendar events
+  - calendar.update - Update existing calendar event
+  - calendar.delete - Delete a calendar event

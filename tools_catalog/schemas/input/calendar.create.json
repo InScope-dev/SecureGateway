@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["title", "start_time"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Title of the calendar event",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the calendar event",
+      "maxLength": 1000
+    },
+    "start_time": {
+      "type": "string",
+      "description": "Start time of the event in ISO 8601 format",
+      "format": "date-time"
+    },
+    "end_time": {
+      "type": "string",
+      "description": "End time of the event in ISO 8601 format",
+      "format": "date-time"
+    },
+    "participants": {
+      "type": "array",
+      "description": "List of participant email addresses",
+      "items": {
+        "type": "string",
+        "format": "email"
+      }
+    },
+    "location": {
+      "type": "string",
+      "description": "Location of the event",
+      "maxLength": 255
+    },
+    "timezone": {
+      "type": "string",
+      "description": "Timezone for the event",
+      "default": "UTC"
+    }
+  },
+  "additionalProperties": false
+}
