@@ -769,12 +769,44 @@ def get_tool_schema(name):
         return jsonify(metadata)
 
 # API endpoint for policy management
-@app.route("/api/policy")
+@app.route("/api/policy", methods=["GET", "POST"])
 @require_api_key
 def api_policy():
-    """Return current policy"""
-    policy = policy_engine.load_policy()
-    return jsonify({"policy": policy})
+    """Get or update the current policy"""
+    if request.method == "GET":
+        # Return current policy
+        try:
+            policy_path = policy_engine.get_policy_path()
+            with open(policy_path, "r") as f:
+                policy_yaml = f.read()
+            return jsonify({
+                "policy": policy_engine.load_policy(),
+                "policy_yaml": policy_yaml
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    else:
+        # Update policy with hot-reloading
+        try:
+            data = request.get_json()
+            if not data or "policy_yaml" not in data:
+                return jsonify({"error": "Missing policy_yaml field"}), 400
+            
+            policy_yaml = data["policy_yaml"]
+            project_id = data.get("project_id", "default")
+            
+            success, error = policy_engine.save_policy_yaml(policy_yaml, project_id)
+            if success:
+                return jsonify({
+                    "success": True, 
+                    "message": "Policy updated and hot-reloaded",
+                    "policy": policy_engine.load_policy(project_id)
+                })
+            else:
+                return jsonify({"error": error}), 400
+        except Exception as e:
+            logging.error(f"Error updating policy: {str(e)}")
+            return jsonify({"error": str(e)}), 500
 
 @app.route("/api/policy/reload", methods=["POST"])
 @require_api_key

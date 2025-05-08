@@ -749,7 +749,52 @@ def merge_policy_yaml(target_path: str, new_policy: Dict[str, Any]) -> bool:
         with open(target_path, "w") as f:
             yaml.dump(existing_policy, f, default_flow_style=False)
             
+        # Automatically reload policies after merging
+        reload_policies()
         return True
     except Exception as e:
         logger.error(f"Error merging policy: {str(e)}")
         return False
+
+def save_policy_yaml(policy_yaml: str, project_id: str = "default") -> Tuple[bool, Optional[str]]:
+    """
+    Save a YAML policy string to the policy file and reload it
+    
+    This function enables hot-reloading of policy changes without restarting the server.
+    
+    Args:
+        policy_yaml: The policy YAML string to save
+        project_id: The project ID
+        
+    Returns:
+        Tuple of (success, error_message)
+    """
+    try:
+        # Parse the YAML to validate it
+        try:
+            policy = yaml.safe_load(policy_yaml)
+            if not isinstance(policy, dict):
+                return False, "Invalid policy format: root must be a dictionary"
+            if "rules" not in policy or not isinstance(policy["rules"], list):
+                return False, "Invalid policy format: must contain a 'rules' list"
+        except yaml.YAMLError as e:
+            return False, f"Invalid YAML format: {str(e)}"
+        
+        # Get the policy path for this project
+        policy_path = get_policy_path(project_id)
+        
+        # Create a backup before replacing
+        backup_policy(policy_path)
+        
+        # Write the policy file
+        with open(policy_path, "w") as f:
+            f.write(policy_yaml)
+        
+        # Reload policies to apply changes immediately
+        reload_policies()
+        
+        logger.info(f"Policy updated and hot-reloaded for project: {project_id}")
+        return True, None
+    except Exception as e:
+        logger.error(f"Error saving policy: {str(e)}")
+        return False, str(e)
