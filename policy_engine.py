@@ -1,14 +1,22 @@
 """
 MCP-Sec Policy Engine
-Loads and enforces security policies from policies.yaml file
+Loads and enforces security policies from policies/*.yaml files
 and contextual policies from contextual_policy.yaml
 Also validates model API keys from model_keys.yaml
+
+Supports:
+- Multi-project policies (policies/{project_id}.yaml)
+- Policy versioning and rollbacks via history directory
+- Contextual policy enforcement
+- Per-model API key validation
 """
 import os
 import re
 import yaml
 import time
+import shutil
 import logging
+import glob
 from datetime import datetime
 from fnmatch import fnmatch
 from typing import Dict, List, Tuple, Any, Optional
@@ -19,12 +27,132 @@ logger = logging.getLogger(__name__)
 # Global policy stores
 POLICIES = {}
 CONTEXTUAL_POLICIES = []
+MODEL_KEYS = {}
 
-def load_policy() -> Dict[str, Any]:
+# Ensure directories exist
+os.makedirs("history", exist_ok=True)
+os.makedirs("policies", exist_ok=True)
+os.makedirs("policies/default", exist_ok=True)
+
+def backup_policy(path: str):
     """
-    Load policies from YAML file
+    Create a timestamped backup of the policy file
+    
+    Args:
+        path: Path to the policy file to backup
     """
-    policy_path = os.environ.get("POLICY_PATH", "policies.yaml")
+    if not os.path.exists(path):
+        return
+        
+    # Create backup with timestamp
+    ts = int(time.time())
+    backup_dir = "history"
+    filename = os.path.basename(path)
+    backup_path = f"{backup_dir}/{filename}.{ts}"
+    
+    try:
+        shutil.copy(path, backup_path)
+        logger.info(f"Created backup of {path} at {backup_path}")
+    except Exception as e:
+        logger.error(f"Failed to create backup: {str(e)}")
+
+def get_policy_history() -> List[Dict[str, Any]]:
+    """
+    Get a list of all available policy backups
+    
+    Returns:
+        List of dictionaries with 'timestamp' and 'path' keys
+    """
+    history = []
+    
+    # Find all policy backups
+    for path in glob.glob("history/*.yaml.*"):
+        try:
+            # Extract timestamp from filename
+            ts = int(path.split(".")[-1])
+            dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            history.append({
+                "timestamp": ts,
+                "datetime": dt,
+                "path": path,
+                "filename": os.path.basename(path)
+            })
+        except (ValueError, IndexError):
+            continue
+    
+    # Sort by timestamp (newest first)
+    history.sort(key=lambda x: x["timestamp"], reverse=True)
+    return history
+
+def rollback_policy(timestamp: int) -> bool:
+    """
+    Rollback to a specific policy version
+    
+    Args:
+        timestamp: Unix timestamp of the backup to restore
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    # Find the backup file
+    backup_files = glob.glob(f"history/*.yaml.{timestamp}")
+    if not backup_files:
+        logger.error(f"No backup found with timestamp {timestamp}")
+        return False
+    
+    try:
+        # Extract the original filename from the backup
+        backup_path = backup_files[0]
+        original_filename = ".".join(os.path.basename(backup_path).split(".")[:-1])
+        original_path = original_filename
+        
+        # Ensure we still have a backup of the current file
+        backup_policy(original_path)
+        
+        # Restore from backup
+        shutil.copy(backup_path, original_path)
+        logger.info(f"Restored {original_path} from {backup_path}")
+        
+        # Reload policies
+        reload_policies()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to rollback: {str(e)}")
+        return False
+
+def get_policy_path(project_id: str = "default") -> str:
+    """
+    Get the path to the policy file for a specific project
+    
+    Args:
+        project_id: The project ID
+        
+    Returns:
+        Path to the policy file
+    """
+    # First check for project-specific policy
+    project_path = f"policies/{project_id}.yaml"
+    if os.path.exists(project_path):
+        return project_path
+        
+    # Then check for default policy locations
+    if os.path.exists("policies.yaml"):
+        return "policies.yaml"
+    
+    # Otherwise return the default project policy
+    return "policies/default.yaml"
+
+def load_policy(project_id: str = "default") -> Dict[str, Any]:
+    """
+    Load policies from YAML file for a specific project
+    
+    Args:
+        project_id: The project ID
+        
+    Returns:
+        The loaded policy
+    """
+    policy_path = get_policy_path(project_id)
     logger.info(f"Loading policies from {policy_path}")
     
     try:

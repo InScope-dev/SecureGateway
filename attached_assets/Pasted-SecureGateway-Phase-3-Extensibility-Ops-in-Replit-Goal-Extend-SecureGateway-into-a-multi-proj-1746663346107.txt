@@ -1,0 +1,176 @@
+SecureGateway Phase 3 (Extensibility + Ops in Replit)
+🎯 Goal
+Extend SecureGateway into a multi-project, plugin-ready, policy-versioned AI gateway — all while staying inside Replit.
+
+You’ll implement:
+
+🧩 Plugin support (custom enforcement)
+
+🔑 Per-project / multi-tenant policies
+
+🧾 Policy versioning + rollback
+
+📊 Anomaly alerts + webhook/SIEM
+
+🔁 Session trace viewer
+
+🔄 Replay simulator
+
+📄 JSON schema endpoint
+
+🛠 Config polish (YAML lint, editor improvements)
+
+🔹 1. Multi-Project Policy Support
+Load policies/{project_id}.yaml based on query param or header:
+
+python
+Copy
+Edit
+project_id = request.headers.get("X-Project-ID", "default")
+policy_path = f"policies/{project_id}.yaml"
+Do the same for:
+
+model_keys/{project_id}.yaml
+
+contextual_policies/{project_id}.yaml
+
+Fallback to default.yaml if not found.
+
+🔹 2. Plugin Hook Support
+In plugins/ directory, add:
+
+python
+Copy
+Edit
+# plugins/log_tool.py
+def on_toolcall(ctx, tool_name, payload):
+    print(f"[PLUGIN] {tool_name} called with {payload}")
+In mcp_routes.py, load & call all plugins:
+
+python
+Copy
+Edit
+import importlib.util, glob
+
+def run_plugins(ctx, tool, payload):
+    for path in glob.glob("plugins/*.py"):
+        name = path.split("/")[-1][:-3]
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if hasattr(mod, "on_toolcall"):
+            mod.on_toolcall(ctx, tool, payload)
+Call run_plugins(context, tool_name, input_payload) after policy passes.
+
+🔹 3. Policy Versioning & Rollback
+Before saving policies.yaml, copy to a timestamped file:
+
+python
+Copy
+Edit
+import shutil
+ts = int(time.time())
+shutil.copy("policies.yaml", f"history/policies.{ts}.yaml")
+Add rollback route:
+
+python
+Copy
+Edit
+@app.post("/api/policy/rollback/<ts>")
+def rollback(ts):
+    shutil.copy(f"history/policies.{ts}.yaml", "policies.yaml")
+    reload_policies()
+    return {"status": "rolled back"}
+🔹 4. Session Tracing & Replay
+In session_tracker.py, expose:
+
+python
+Copy
+Edit
+def get_session_trace(session_id):
+    return SESSION_STATE.get(session_id)
+Add route:
+
+python
+Copy
+Edit
+@app.get("/api/session/<sid>")
+def session_trace(sid): return jsonify(get_session_trace(sid))
+Add POST /api/simulate:
+
+python
+Copy
+Edit
+@app.post("/api/simulate")
+def simulate():
+    trace = request.json
+    results = []
+    for c in trace["tool_calls"]:
+        result = check_policy_contextual(trace["model_id"], c["tool"], trace["session_id"], trace)
+        results.append({**c, **result})
+    return jsonify(results)
+🔹 5. Anomaly Detection
+In audit_logger.py, detect spikes:
+
+python
+Copy
+Edit
+def detect_anomalies():
+    now = time.time()
+    recent = [e for e in LOG_HISTORY if now - e["timestamp"] < 120]
+    denials = sum(1 for e in recent if e["status"] == "denied")
+    if denials >= 10:
+        print("🚨 Spike: >10 denials in 2min")
+        if os.getenv("SIEM_URL"):
+            requests.post(os.getenv("SIEM_URL"), json={"alert": "denial spike", "count": denials})
+Call detect_anomalies() after each log.
+
+🔹 6. JSON Schema Publishing
+Serve schemas at:
+
+python
+Copy
+Edit
+@app.get("/schema/<tool>.json")
+def schema(tool):
+    return send_from_directory("schemas", f"{tool}.json")
+🔹 7. Admin UI Enhancements
+In /dash:
+
+Add policy YAML linter before save:
+
+js
+Copy
+Edit
+try {
+  YAML.parse(document.getElementById("policy_editor").value);
+} catch (e) {
+  alert("YAML error: " + e.message);
+  return;
+}
+Add “Rollback” button with timestamp list:
+
+js
+Copy
+Edit
+fetch("/api/policy/history").then(...) // populate dropdown
+fetch("/api/policy/rollback/16938290", {method: "POST", headers})
+✅ Commit + Docs
+bash
+Copy
+Edit
+git add .
+git commit -m "feat: Phase 3 – multi-project, plugins, replay, SIEM, rollback"
+git push origin main
+Then update your README:
+
+markdown
+Copy
+Edit
+## Phase 3 Capabilities
+- 🔐 Project-aware enforcement
+- 🧩 Plugin runtime logic
+- 🛠 Policy rollback
+- 📊 Anomaly detection
+- 🔁 Replay & simulation
+- 📄 Schema publishing
