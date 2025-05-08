@@ -17,7 +17,7 @@ from functools import wraps
 from typing import Dict, List, Union, Optional, Any, Tuple
 
 import yaml
-from flask import Flask, request, jsonify, Response, render_template
+from flask import Flask, request, jsonify, Response, render_template, render_template_string, Blueprint
 
 import audit_logger
 import mcp_routes
@@ -1395,6 +1395,7 @@ def monitor():
 def admin():
     """Admin dashboard with full configuration options and detailed metrics"""
     api_key = request.args.get("api_key", "")
+    bypass_auth = request.args.get("bypass_auth", "false")
     
     # Get recent logs
     logs = []
@@ -1403,8 +1404,8 @@ def admin():
             logs = [json.loads(line) for line in f.readlines()]
             logs = logs[-50:]  # Get most recent 50 logs
             logs.reverse()  # Show newest first
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Error reading logs: {e}")
     
     # Get metrics
     total_requests = len(logs)
