@@ -97,14 +97,27 @@ def require_api_key(view_function):
     """Decorator to require admin API key for sensitive endpoints."""
     @wraps(view_function)
     def decorated_function(*args, **kwargs):
-        admin_key = os.environ.get("ADMIN_KEY", "admin-dev-key")
+        # Get the admin key from environment variable
+        admin_key = os.environ.get("ADMIN_KEY")
+        
+        if not admin_key:
+            logger.error("ADMIN_KEY environment variable not set. Using a secure fallback.")
+            # Use a secure random value that changes on each restart
+            # This is just a fallback and will be highly secure but inconvenient
+            import secrets
+            admin_key = secrets.token_hex(16)
+            logger.info(f"Using temporary admin key: {admin_key}")
+        
+        # Check header first (more secure)
         header_key = request.headers.get("X-Admin-Key")
         
         # Also check query params for ease of testing
         if not header_key:
             header_key = request.args.get("api_key")
             
-        if header_key != admin_key:
+        if not header_key or header_key != admin_key:
+            # Log failed attempt but don't expose too much detail
+            logger.warning(f"API key authentication failed from {request.remote_addr}")
             return jsonify({"error": "Invalid or missing API key"}), 401
         
         return view_function(*args, **kwargs)

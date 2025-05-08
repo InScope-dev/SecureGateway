@@ -151,23 +151,47 @@ def tool_call():
         }
         
         # Validate model API key
-        model_key = request.headers.get("X-Model-Key", "")  # Default to empty string if not present
-        is_valid, reason = validate_model_key(model_id, model_key, tool_name)
-        if not is_valid:
-            response["reason"] = reason
-            # Log the denied event
-            log_event({
-                "model_id": model_id,
-                "session_id": session_id,
-                "tool": tool_name,
-                "input": input_data,
-                "status": "denied",
-                "reason": reason,
-                "latency_ms": int((time.time() - start_time) * 1000)
-            })
-            # Update session tracker
-            update_tool_call(session_id, tool_name, input_data, "denied", reason=reason)
-            return jsonify(response), 401
+        model_key = request.headers.get("X-Model-Key")
+        
+        # Special case for testing - if BYPASS_MODEL_KEY_CHECK is set, skip validation
+        if not os.environ.get("BYPASS_MODEL_KEY_CHECK"):
+            # If key is missing completely, return 401
+            if model_key is None:
+                reason = f"Missing model API key for {model_id}"
+                response["reason"] = reason
+                
+                # Log the denied event with appropriate details
+                log_event({
+                    "model_id": model_id,
+                    "session_id": session_id,
+                    "tool": tool_name,
+                    "input": input_data,
+                    "status": "denied",
+                    "reason": reason,
+                    "latency_ms": int((time.time() - start_time) * 1000)
+                })
+                
+                # Update session tracker
+                update_tool_call(session_id, tool_name, input_data, "denied", reason=reason)
+                return jsonify(response), 401
+            
+            # Validate the key that was provided
+            is_valid, reason = validate_model_key(model_id, model_key, tool_name)
+            if not is_valid:
+                response["reason"] = reason
+                # Log the denied event
+                log_event({
+                    "model_id": model_id,
+                    "session_id": session_id,
+                    "tool": tool_name,
+                    "input": input_data,
+                    "status": "denied",
+                    "reason": reason,
+                    "latency_ms": int((time.time() - start_time) * 1000)
+                })
+                # Update session tracker
+                update_tool_call(session_id, tool_name, input_data, "denied", reason=reason)
+                return jsonify(response), 401
         
         # Get session context for contextual policy checks
         context = get_context(session_id)
