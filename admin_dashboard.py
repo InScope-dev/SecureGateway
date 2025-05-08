@@ -93,7 +93,7 @@ def require_api_key(view_function):
     
     return decorated_function
 
-@admin_bp.route("/admin")
+@admin_bp.route("/")
 @require_api_key
 def admin_dashboard():
     """Admin dashboard with full configuration options and detailed metrics"""

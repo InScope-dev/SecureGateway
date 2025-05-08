@@ -48,7 +48,7 @@ app.secret_key = os.environ.get("SESSION_SECRET", "mcp-sec-insecure-key")
 # Import blueprints
 try:
     from admin_dashboard import admin_bp
-    app.register_blueprint(admin_bp)
+    app.register_blueprint(admin_bp, url_prefix='/admin')
     logger.info("Loaded admin dashboard blueprint")
 except ImportError:
     logger.warning("Admin dashboard module not available")
