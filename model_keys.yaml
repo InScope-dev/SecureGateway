@@ -1,37 +1,30 @@
-# Model API Keys Configuration
-# This file defines which models have authorized API keys
-# and what tools each model is allowed to access
+# Model API keys and permissions
+# These keys are used to authenticate models when they make API calls
 
 models:
   gpt-4-0613:
-    key: "gpt4-api-key-12345"
-    description: "OpenAI GPT-4 June 2023 Version"
-    tools:
-      - "search.*"
-      - "calendar.*"
-      - "email.*"
-    expires: "2026-01-01T00:00:00"
-  
+    key: "gpt4-test-key"
+    description: "GPT-4 API (June 2023)"
+    allowed_tools:
+      - "*"  # Allow all tools
+    
   claude-3-opus:
-    key: "claude3-api-key-67890" 
-    description: "Anthropic Claude 3 Opus"
-    tools:
-      - "search.*"
+    key: "claude3-test-key"
+    description: "Claude 3 Opus API"
+    allowed_tools:
       - "calendar.*"
-      - "file.read"
-    expires: "2026-01-01T00:00:00"
+      - "search.*"
+      - "email.*"
   
   gemini-pro:
-    key: "gemini-api-key-abcde"
-    description: "Google Gemini Pro"
-    tools:
+    key: "gemini-test-key"
+    description: "Gemini Pro API"
+    allowed_tools:
+      - "calendar.*"
       - "search.*"
-      - "calendar.read"
-    expires: "2026-01-01T00:00:00"
-  
+    
   llama-3-70b:
-    key: "llama3-api-key-fghij"
-    description: "Meta Llama 3 70B"
-    tools:
+    key: "llama3-test-key"
+    description: "Llama 3 (70B) API"
+    allowed_tools:
       - "search.*"
-    expires: "2026-01-01T00:00:00"

@@ -18,11 +18,76 @@ SESSION_STATE = {}
 
 # Tool risk categories for security impact assessment
 TOOL_RISK_CATEGORIES = {
-    "write": ["*.write*", "*.create*", "*.update*", "*.delete*", "*.remove*", "db.*"],
-    "read": ["*.read*", "*.get*", "*.list*", "*.search*", "*.find*"],
-    "identity": ["*.auth*", "*.login*", "*.credential*", "*.token*", "*.key*"],
-    "system": ["*.exec*", "*.run*", "*.system*", "*.command*", "*.shell*"],
-    "network": ["*.http*", "*.connect*", "*.url*", "*.download*", "*.upload*"]
+    "system": [
+        "system.*",
+        "shell.*",
+        "os.*",
+        "exec.*",
+        "*.exec*", 
+        "*.run*", 
+        "*.system*", 
+        "*.command*", 
+        "*.shell*"
+    ],
+    "write": [
+        "*.write*",
+        "*.create*",
+        "*.update*",
+        "*.delete*",
+        "*.remove*",
+        "*.insert*",
+        "db.*",
+        "file.write",
+        "document.edit"
+    ],
+    "read": [
+        "*.read*", 
+        "*.get*", 
+        "*.list*", 
+        "*.search*", 
+        "*.find*"
+    ],
+    "identity": [
+        "auth.*",
+        "login.*",
+        "user.*",
+        "identity.*",
+        "password.*",
+        "credential.*",
+        "*.auth*", 
+        "*.login*", 
+        "*.credential*", 
+        "*.token*", 
+        "*.key*"
+    ],
+    "network": [
+        "http.*",
+        "api.*",
+        "request.*",
+        "fetch.*",
+        "url.*",
+        "external.*",
+        "*.http*", 
+        "*.connect*", 
+        "*.url*", 
+        "*.download*", 
+        "*.upload*"
+    ],
+    "data": [
+        "database.*",
+        "query.*",
+        "*.query",
+        "sql.*",
+        "search.*",
+        "*.search"
+    ],
+    "low_risk": [
+        "math.*",
+        "convert.*",
+        "time.*",
+        "date.*",
+        "format.*"
+    ]
 }
 
 def init_session(session_id, model_id, prompt=""):
