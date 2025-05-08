@@ -28,6 +28,7 @@ import schema_validator
 import session_tracker
 from session_tracker import get_context, score_session
 from rate_limiter import reset_limits
+import policy_validator
 
 logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

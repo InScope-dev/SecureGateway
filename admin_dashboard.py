@@ -12,6 +12,8 @@ from typing import Dict, List, Any, Optional
 from flask import Blueprint, request, jsonify, render_template_string
 from datetime import datetime
 
+from auth import login_required
+
 # Setup logger for this module
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,11 @@ def format_datetime(value):
         return str(value)
 
 def require_api_key(view_function):
-    """Decorator to require admin API key for sensitive endpoints."""
+    """
+    Legacy decorator to require admin API key for sensitive endpoints.
+    This is maintained for backward compatibility with API clients.
+    For browser access, we use Flask sessions through auth.login_required.
+    """
     @wraps(view_function)
     def decorated_function(*args, **kwargs):
         # For development purposes, always allow bypass_auth=true
@@ -55,61 +61,22 @@ def require_api_key(view_function):
             admin_key = secrets.token_hex(16)
             logger.info(f"Using temporary admin key: {admin_key}")
         
-        # Check query params for ease of testing
-        api_key = request.args.get("api_key")
-            
-        if not api_key or api_key != admin_key:
-            # Log failed attempt but don't expose too much detail
-            logger.warning(f"API key authentication failed from {request.remote_addr}")
-            
-            # Return an HTML page for browser requests, JSON for API requests
-            if request.headers.get('Accept', '').find('application/json') >= 0:
+        # If this is an API request (not a browser), check the API key
+        if request.headers.get('Accept', '').find('application/json') >= 0:
+            # Check for X-Admin-Key header or api_key query param
+            api_key = request.headers.get('X-Admin-Key') or request.args.get("api_key")
+                
+            if not api_key or api_key != admin_key:
+                # Log failed attempt but don't expose too much detail
+                logger.warning(f"API key authentication failed from {request.remote_addr}")
                 return jsonify({"error": "Invalid or missing API key"}), 401
-            else:
-                return render_template_string("""
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>Authentication Required</title>
-                    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-                </head>
-                <body>
-                    <div class="container mt-5">
-                        <div class="row justify-content-center">
-                            <div class="col-md-6">
-                                <div class="card">
-                                    <div class="card-header bg-danger text-white">
-                                        <h4 class="mb-0">Authentication Required</h4>
-                                    </div>
-                                    <div class="card-body">
-                                        <p>You need an API key to access this administrative area.</p>
-                                        <form method="get" action="/admin">
-                                            <div class="mb-3">
-                                                <label for="api_key" class="form-label">Admin API Key:</label>
-                                                <input type="password" class="form-control" id="api_key" name="api_key" required>
-                                            </div>
-                                            <button type="submit" class="btn btn-primary">Submit</button>
-                                            <a href="/monitor" class="btn btn-secondary ms-2">Go to Monitoring</a>
-                                        </form>
-                                        <div class="mt-3">
-                                            <p class="small text-muted">For development, you can use <a href="/admin?bypass_auth=true">bypass_auth=true</a></p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </body>
-                </html>
-                """), 401
         
         return view_function(*args, **kwargs)
     
     return decorated_function
 
 @admin_bp.route("/")
+@login_required
 def admin_dashboard():
     """Admin dashboard focused on tools catalog"""
     logger.info("Admin dashboard accessed with tools catalog")

@@ -4,10 +4,15 @@ Maintains session state including prompts and tool usage history
 - Phase 5 enhancement: Risk scoring for sessions
 - Phase 5 enhancement: Security impact assessment for tools
 - Phase 6 enhancement: Integration with tools catalog for standardized risk assessment
+- Phase 6 enhancement: Session state persistence with disk fallback
 """
+import os
 import time
 import logging
 import re
+import pickle
+import signal
+import atexit
 from collections import Counter
 from fnmatch import fnmatch
 from typing import Dict, Any, List, Optional
@@ -53,6 +58,11 @@ try:
 except ImportError:
     logger.warning("Tools catalog not available, using pattern-based classification")
     pass
+
+# Constants for session persistence
+SESSION_CACHE_FILE = "sessions.cache"
+SESSION_SAVE_INTERVAL = 50  # Save after this many requests
+REQUEST_COUNT = 0
 
 # Global session state store
 SESSION_STATE = {}
@@ -421,3 +431,119 @@ def get_session_stats(session_id):
         "top_tools": top_tools,
         "risk_score": score_session(session_id)
     }
+    
+def save_sessions_to_disk():
+    """
+    Save session state to disk cache
+    
+    This function persists the session state to a file so it can be loaded
+    on restart, ensuring session data isn't lost on server restarts.
+    """
+    try:
+        logger.info(f"Saving {len(SESSION_STATE)} sessions to disk cache")
+        with open(SESSION_CACHE_FILE, 'wb') as f:
+            pickle.dump(SESSION_STATE, f)
+        logger.debug("Session state successfully saved to disk")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving session state to disk: {str(e)}")
+        return False
+        
+def load_sessions_from_disk():
+    """
+    Load session state from disk cache
+    
+    This function restores the session state from a file on startup,
+    ensuring session data isn't lost on server restarts.
+    
+    Returns:
+        True if sessions were loaded, False otherwise
+    """
+    global SESSION_STATE
+    
+    if not os.path.exists(SESSION_CACHE_FILE):
+        logger.info("No session cache file found")
+        return False
+        
+    try:
+        logger.info(f"Loading sessions from disk cache: {SESSION_CACHE_FILE}")
+        with open(SESSION_CACHE_FILE, 'rb') as f:
+            loaded_state = pickle.load(f)
+            
+        if not isinstance(loaded_state, dict):
+            logger.error(f"Invalid session cache format: {type(loaded_state)}")
+            return False
+            
+        # Merge loaded state with current state
+        SESSION_STATE = loaded_state
+        
+        # Log session count
+        session_count = len(SESSION_STATE)
+        logger.info(f"Loaded {session_count} sessions from disk cache")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error loading session state from disk: {str(e)}")
+        return False
+        
+def maybe_save_sessions():
+    """
+    Save sessions to disk periodically based on request count
+    """
+    global REQUEST_COUNT
+    
+    # Increment request counter
+    REQUEST_COUNT += 1
+    
+    # Save sessions every N requests
+    if REQUEST_COUNT % SESSION_SAVE_INTERVAL == 0:
+        save_sessions_to_disk()
+        
+# Update the update_tool_call function to trigger periodic saves
+def update_tool_call(session_id, tool_name, input_data, status, output=None, reason=None):
+    """
+    Record a tool call in the session history
+    
+    Args:
+        session_id: Session identifier
+        tool_name: Name of the tool called
+        input_data: Input parameters to the tool
+        status: Status of the call (allowed, denied, error)
+        output: Optional tool result
+        reason: Optional reason for denial or error
+    """
+    if session_id not in SESSION_STATE:
+        logger.warning(f"Attempt to update non-existent session: {session_id}")
+        return
+        
+    SESSION_STATE[session_id]["tool_calls"].append({
+        "tool": tool_name,
+        "input": input_data,
+        "output": output,
+        "status": status,
+        "reason": reason,
+        "timestamp": time.time()
+    })
+    logger.debug(f"Session {session_id} updated: {tool_name} call with status {status}")
+    
+    # Maybe save sessions to disk based on request count
+    maybe_save_sessions()
+
+# Register signal handlers and atexit hook for graceful shutdown
+def _handle_shutdown(signum=None, frame=None):
+    """Signal handler to save sessions on shutdown"""
+    logger.info("Shutdown signal received, saving sessions to disk")
+    save_sessions_to_disk()
+    
+# Register signal handlers
+signal.signal(signal.SIGTERM, _handle_shutdown)
+signal.signal(signal.SIGINT, _handle_shutdown)
+    
+# Register atexit hook
+atexit.register(save_sessions_to_disk)
+
+# Load sessions on module import
+try:
+    load_sessions_from_disk()
+except Exception as e:
+    logger.error(f"Failed to load sessions on startup: {str(e)}")

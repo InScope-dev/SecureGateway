@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP-Sec Gateway - Admin Login</title>
+    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: var(--bs-dark);
+            color: var(--bs-light);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+        }
+        .login-container {
+            max-width: 420px;
+            margin: 0 auto;
+        }
+        .card {
+            border-radius: 0.5rem;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.3);
+        }
+        .card-header {
+            border-radius: 0.5rem 0.5rem 0 0;
+        }
+        .logo {
+            max-width: 280px;
+            margin: 0 auto 1.5rem;
+            display: block;
+        }
+        .login-title {
+            text-align: center;
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container login-container">
+        <div class="row justify-content-center">
+            <div class="col-12">
+                <h1 class="login-title text-warning mb-4">MCP-Sec Gateway</h1>
+                
+                <div class="card">
+                    <div class="card-header bg-danger text-white">
+                        <h4 class="mb-0">Administrative Login</h4>
+                    </div>
+                    <div class="card-body">
+                        {% if error %}
+                        <div class="alert alert-danger" role="alert">
+                            {{ error }}
+                        </div>
+                        {% endif %}
+                        
+                        <form method="post" action="{{ url_for('auth.login') }}">
+                            {{ form.hidden_tag() }}
+                            <div class="mb-3">
+                                <label for="password" class="form-label">Admin Password:</label>
+                                {{ form.password(class="form-control", placeholder="Enter admin password") }}
+                            </div>
+                            <div class="form-check mb-3">
+                                {{ form.remember(class="form-check-input") }}
+                                <label class="form-check-label" for="remember">
+                                    Remember me for 24 hours
+                                </label>
+                            </div>
+                            <div class="d-grid gap-2">
+                                {{ form.submit(class="btn btn-primary") }}
+                                <a href="/" class="btn btn-secondary">Back to Home</a>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="card-footer text-center">
+                        <p class="small text-muted mb-0">
+                            SecureGateway v1.0 - Phase 6 - Authentication Required
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="mt-4 text-center">
+                    <a href="/monitor" class="btn btn-sm btn-info">Public Monitoring Dashboard</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
