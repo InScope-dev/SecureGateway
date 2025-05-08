@@ -1225,6 +1225,36 @@ def dash():
     
     html_parts.append(logs_table)
     
+    # Tools catalog section
+    tools_section = """
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Tools Catalog</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="list-group" id="tool_list">
+                                    <div class="d-flex justify-content-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <pre id="tool_detail" class="p-3 bg-dark text-light rounded" style="min-height: 200px;">Select a tool to view details</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>"""
+    
+    html_parts.append(tools_section)
+    
     # Policy management and schema validation
     html_parts.append("""
         <div class="row">
@@ -1474,6 +1504,9 @@ def dash():
         
         // Load project list
         loadProjects();
+        
+        // Load tools catalog
+        loadToolsCatalog();
         
         // Session inspector form handler
         document.getElementById('sessionForm').addEventListener('submit', function(e) {
