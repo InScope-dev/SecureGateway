@@ -1,39 +1,37 @@
-# Shadow Mode Contextual Policy - Preview Rules
-# These rules will be simulated but not enforced
-# Used for testing and tuning new policy rules
+# Shadow mode contextual policies - Not enforced, only simulated
+# These rules will be evaluated but not actually enforced
+# Used for testing new policy configurations
 
-- when_tool: "db.*"
-  block_if_prompt_contains:
-    - "drop table"
-    - "delete all"
-    - "destroy"
-  require_prior_successful_tool: "auth.verify"
-  name: "Database operations require prior authentication"
+shadow_rules:
+  # Example rule 1: Block high-risk tools after 3 regular tool calls
+  - name: "Shadow - High-risk after sequence"
+    description: "Demo rule that detects high-risk tool usage after multiple regular tool calls"
+    condition:
+      tool_categories: ["file_write", "code_execution"]
+      prior_tools_count: 3
+    action:
+      block: true
+      reason: "SHADOW MODE: High-risk tool detected after sequence of regular tools"
 
-- when_tool: "*.delete*"
-  block_if_previous_denials: 3
-  name: "Block delete operations after 3 denied operations in same session"
-
-- when_tool: "*"
-  block_if_prompt_contains:
-    - "bypass"
-    - "hack"
-    - "exploit"
-    - "vulnerability"
-  name: "Block tools that follow prompts with hacking language"
-
-- when_tool: "system.*"
-  block_if_session_risk_above: 0.6
-  name: "Block system tools for high-risk sessions"
-
-- when_tool: "*.write*"
-  max_calls_per_session: 5
-  name: "Limit write operations to 5 per session"
-
-- when_tool: "calendar.*"
-  max_calls_per_minute: 10
-  name: "Rate limit calendar operations to prevent abuse"
-
-- when_tool: "email.*"
-  require_prior_successful_tool: "auth.verify"
-  name: "Email operations require prior authentication"
+  # Example rule 2: Detect potential jailbreak patterns
+  - name: "Shadow - Jailbreak detection"
+    description: "Demo rule that looks for jailbreak attempts in prompt text"
+    condition:
+      prompt_contains:
+        - "ignore previous instructions"
+        - "bypass security"
+        - "ignore the rules"
+      tool_categories: ["any"]
+    action:
+      block: true
+      reason: "SHADOW MODE: Potential jailbreak pattern detected in prompt"
+      
+  # Example rule 3: Progressive risk escalation
+  - name: "Shadow - Progressive risk"
+    description: "Demo rule that simulates denials on accumulated risk"
+    condition:
+      risk_score_above: 0.5
+      tool_categories: ["any"]
+    action:
+      block: true
+      reason: "SHADOW MODE: Session risk score exceeds threshold"

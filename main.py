@@ -890,6 +890,65 @@ def api_simulate():
             "traceback": traceback.format_exc()
         }, 500
 
+@app.route("/api/shadow_policy", methods=["GET"])
+@require_api_key
+def api_shadow_policy():
+    """Get current shadow policy"""
+    try:
+        shadow_policy_path = "contextual_policy.preview.yaml"
+        if os.path.exists(shadow_policy_path):
+            with open(shadow_policy_path, "r") as f:
+                shadow_policy_yaml = f.read()
+                
+            # Try to parse for validation
+            shadow_policy = yaml.safe_load(shadow_policy_yaml)
+            
+            return {
+                "shadow_policy_yaml": shadow_policy_yaml,
+                "shadow_policy": shadow_policy
+            }
+        else:
+            return {
+                "shadow_policy_yaml": "",
+                "shadow_policy": None,
+                "message": "No shadow policy file found"
+            }
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@app.route("/api/shadow_policy", methods=["POST"])
+@require_api_key
+def api_save_shadow_policy():
+    """Save shadow policy"""
+    data = request.json
+    if not data or "shadow_policy_yaml" not in data:
+        return {"error": "No policy data provided"}, 400
+    
+    try:
+        # Validate YAML format
+        yaml.safe_load(data["shadow_policy_yaml"])
+        
+        # Create backup before overwriting
+        shadow_policy_path = "contextual_policy.preview.yaml"
+        if os.path.exists(shadow_policy_path):
+            from shutil import copyfile
+            import time
+            backup_name = f"contextual_policy.preview.{int(time.time())}.yaml"
+            try:
+                copyfile(shadow_policy_path, backup_name)
+            except Exception as e:
+                logging.error(f"Failed to create shadow policy backup: {str(e)}")
+        
+        # Save the new shadow policy
+        with open(shadow_policy_path, "w") as f:
+            f.write(data["shadow_policy_yaml"])
+        
+        return {"status": "saved"}
+    except yaml.YAMLError as e:
+        return {"error": f"Invalid YAML: {str(e)}"}, 400
+    except Exception as e:
+        return {"error": str(e)}, 500
+
 @app.route("/api/projects", methods=["GET"])
 @require_api_key
 def api_projects():
@@ -1117,6 +1176,30 @@ def dash():
         </div>
         
         <div class="row">
+            <div class="col-md-12 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Shadow Policy Management</h5>
+                        <div class="d-flex gap-2">
+                            <button id="loadShadowPolicy" class="btn btn-sm btn-secondary">Load Current</button>
+                            <button id="saveShadowPolicy" class="btn btn-sm btn-success">Save Changes</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <p class="mb-0"><strong>Shadow Mode Policies</strong> allow you to test new policy rules without enforcing them. These policies are evaluated but not enforced, letting you collect metrics and analyze the potential impact before activating them.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="shadowPolicyEditor" class="form-label">Shadow Policy Configuration (YAML):</label>
+                            <textarea id="shadowPolicyEditor" class="form-control font-monospace" rows="12" style="font-size: 0.875rem;"></textarea>
+                        </div>
+                        <div id="shadowPolicyStatus" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
             <div class="col-md-6 mb-4">
                 <div class="card">
                     <div class="card-header">
@@ -1215,6 +1298,13 @@ def dash():
     html_parts.append("""
     <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // Shadow policy handlers
+        document.getElementById('loadShadowPolicy').addEventListener('click', loadShadowPolicy);
+        document.getElementById('saveShadowPolicy').addEventListener('click', saveShadowPolicy);
+        
+        // Initial shadow policy load
+        loadShadowPolicy();
+        
         // Load policy history
         loadPolicyHistory();
         
@@ -1418,6 +1508,78 @@ def dash():
         .catch(error => {
             alert('Error rolling back policy: ' + error.message);
         });
+    }
+    
+    // Function to load shadow policy
+    function loadShadowPolicy() {
+        const editor = document.getElementById('shadowPolicyEditor');
+        const statusDiv = document.getElementById('shadowPolicyStatus');
+        
+        statusDiv.innerHTML = '<div class="alert alert-info">Loading shadow policy...</div>';
+        
+        fetch('/api/shadow_policy')
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    statusDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                
+                // Show the policy in the editor
+                editor.value = data.shadow_policy_yaml || '';
+                
+                if (data.message) {
+                    statusDiv.innerHTML = `<div class="alert alert-info">${data.message}</div>`;
+                } else {
+                    statusDiv.innerHTML = `<div class="alert alert-success">Shadow policy loaded successfully!</div>`;
+                    
+                    // Auto-hide the status after 3 seconds
+                    setTimeout(() => {
+                        statusDiv.innerHTML = '';
+                    }, 3000);
+                }
+            })
+            .catch(error => {
+                statusDiv.innerHTML = `<div class="alert alert-danger">Error loading shadow policy: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to save shadow policy
+    function saveShadowPolicy() {
+        const editor = document.getElementById('shadowPolicyEditor');
+        const statusDiv = document.getElementById('shadowPolicyStatus');
+        const policyYaml = editor.value.trim();
+        
+        if (!policyYaml) {
+            statusDiv.innerHTML = '<div class="alert alert-warning">Cannot save empty policy</div>';
+            return;
+        }
+        
+        statusDiv.innerHTML = '<div class="alert alert-info">Saving shadow policy...</div>';
+        
+        fetch('/api/shadow_policy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                shadow_policy_yaml: policyYaml
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    statusDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                    return;
+                }
+                
+                statusDiv.innerHTML = '<div class="alert alert-success">Shadow policy saved successfully! It will be used for shadow simulation but will not affect actual policy decisions.</div>';
+                
+                // Don't auto-hide the success message - it's important
+            })
+            .catch(error => {
+                statusDiv.innerHTML = `<div class="alert alert-danger">Error saving shadow policy: ${error.message}</div>`;
+            });
     }
     </script>
 </body>
