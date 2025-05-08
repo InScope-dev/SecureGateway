@@ -3,6 +3,7 @@ MCP-Sec Gateway - Zero Trust Security Layer for Model Context Protocol
 Main entry point for the Flask application
 """
 import datetime
+import glob
 import json
 import logging
 import os
@@ -586,6 +587,32 @@ def api_schema_reload():
         return jsonify({"status": "reloaded"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+        
+@app.route("/api/policy/history")
+@require_api_key
+def api_policy_history():
+    """Get policy version history"""
+    try:
+        history = policy_engine.get_policy_history()
+        return jsonify({"history": history})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/api/policy/rollback/<timestamp>", methods=["POST"])
+@require_api_key
+def api_policy_rollback(timestamp):
+    """Rollback to a previous policy version"""
+    try:
+        ts = int(timestamp)
+        success = policy_engine.rollback_policy(ts)
+        if success:
+            return jsonify({"status": "success", "message": f"Rolled back to policy from {datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')}"})
+        else:
+            return jsonify({"error": "Failed to rollback policy"}), 400
+    except ValueError:
+        return jsonify({"error": "Invalid timestamp"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/logs/export")
 @require_api_key
@@ -744,6 +771,113 @@ def api_session(session_id):
         return {"error": "Session not found"}, 404
     return context
 
+@app.route("/api/simulate", methods=["POST"])
+@require_api_key
+def api_simulate():
+    """Simulate policy evaluation for a tool call"""
+    data = request.json
+    if not data:
+        return {"error": "No data provided"}, 400
+    
+    # Required fields
+    model_id = data.get("model_id")
+    tool = data.get("tool")
+    session_id = data.get("session_id", f"simulation-{int(time.time())}")
+    input_data = data.get("input", {})
+    
+    if not model_id or not tool:
+        return {"error": "Missing required fields: model_id, tool"}, 400
+    
+    try:
+        # Create context simulation
+        context = {
+            "model_id": model_id,
+            "session_id": session_id,
+            "tool_calls": [
+                {
+                    "tool": tool,
+                    "input": input_data,
+                    "timestamp": datetime.datetime.utcnow().isoformat()
+                }
+            ],
+            "initial_prompt": data.get("prompt", "")
+        }
+        
+        # Check basic policy
+        basic_result = policy_engine.check_policy(model_id, tool, session_id)
+        allowed_basic = basic_result[0]
+        reason_basic = basic_result[1]
+        
+        # Check contextual policy
+        contextual_result = policy_engine.check_policy_contextual(model_id, tool, session_id, context)
+        allowed_contextual = contextual_result.get("allowed", False)
+        reason_contextual = contextual_result.get("reason", "")
+        
+        # Validate model key if provided
+        key_valid = True
+        key_reason = ""
+        if "model_key" in data:
+            key_result = policy_engine.validate_model_key(model_id, data["model_key"], tool)
+            key_valid = key_result[0]
+            key_reason = key_result[1]
+        
+        # Return simulation results
+        return {
+            "simulation": True,
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "model_id": model_id,
+            "tool": tool,
+            "session_id": session_id,
+            "input": input_data,
+            "basic_policy": {
+                "allowed": allowed_basic,
+                "reason": reason_basic
+            },
+            "contextual_policy": {
+                "allowed": allowed_contextual,
+                "reason": reason_contextual
+            },
+            "key_validation": {
+                "checked": "model_key" in data,
+                "valid": key_valid,
+                "reason": key_reason
+            },
+            "final_result": {
+                "allowed": allowed_basic and allowed_contextual and (not "model_key" in data or key_valid),
+                "reason": reason_contextual or reason_basic or key_reason or "Allowed"
+            }
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }, 500
+
+@app.route("/api/projects", methods=["GET"])
+@require_api_key
+def api_projects():
+    """Get list of available projects"""
+    try:
+        # Get all YAML files in the policies directory
+        projects = ["default"]  # Always include default
+        
+        # Look for project-specific policy files
+        for path in glob.glob("policies/*.yaml"):
+            try:
+                # Extract project ID from filename
+                filename = os.path.basename(path)
+                project_id = os.path.splitext(filename)[0]
+                
+                if project_id != "default" and project_id not in projects:
+                    projects.append(project_id)
+            except:
+                pass
+        
+        return {"projects": projects}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
 @app.route("/dash")
 def dash():
     """Simple working dashboard with minimal JavaScript"""
@@ -896,9 +1030,11 @@ def dash():
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Policy Management</h5>
-                        <form method="POST" action="/api/policy/reload">
-                            <button type="submit" class="btn btn-sm btn-success">Reload Policies</button>
-                        </form>
+                        <div>
+                            <form method="POST" action="/api/policy/reload" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-success">Reload Policies</button>
+                            </form>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div class="alert alert-info">
@@ -906,7 +1042,21 @@ def dash():
                             <ul class="mb-0">
                                 <li>View policies: <code>/api/policy</code></li>
                                 <li>Reload policies: <code>/api/policy/reload</code> (POST)</li>
+                                <li>View history: <code>/api/policy/history</code></li>
+                                <li>Rollback: <code>/api/policy/rollback/{timestamp}</code> (POST)</li>
                             </ul>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <h6 class="border-bottom pb-2 mb-3">Policy Versioning</h6>
+                            <div id="policyHistory">
+                                <div class="text-center">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="ms-2">Loading policy history...</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -931,7 +1081,7 @@ def dash():
         </div>
         
         <div class="row">
-            <div class="col-12 mb-4">
+            <div class="col-md-6 mb-4">
                 <div class="card">
                     <div class="card-header">
                         <h5 class="mb-0">Session Inspector</h5>
@@ -952,6 +1102,76 @@ def dash():
                     </div>
                 </div>
             </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Multi-Project Management</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info mb-3">
+                            <p class="mb-0">MCP-Sec now supports multiple projects with per-project policies.</p>
+                            <p class="mb-0 mt-2">Create project-specific policies in <code>policies/{project_id}.yaml</code>.</p>
+                        </div>
+                        
+                        <form id="projectSwitcher" class="row g-3">
+                            <div class="col-md-8">
+                                <select class="form-select" id="projectId">
+                                    <option value="default">default</option>
+                                    <!-- Projects will be loaded dynamically -->
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="submit" class="btn btn-primary w-100">Switch Project</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Policy Simulation</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info mb-3">
+                            <p class="mb-0">Test how a policy would handle a specific session without actually processing any tool calls.</p>
+                        </div>
+                        
+                        <form id="simulationForm" class="row g-3">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="simulationModel">Model ID</label>
+                                    <input type="text" class="form-control" id="simulationModel" placeholder="e.g., claude-3-haiku">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="simulationTool">Tool Name</label>
+                                    <input type="text" class="form-control" id="simulationTool" placeholder="e.g., search.query">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="form-group">
+                                    <label for="simulationPayload">Input Payload (JSON)</label>
+                                    <textarea class="form-control" id="simulationPayload" rows="3" placeholder='{"query": "example search"}'></textarea>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary">Run Simulation</button>
+                            </div>
+                        </form>
+                        
+                        <div id="simulationResults" class="mt-3" style="display:none;">
+                            <h6 class="border-bottom pb-2 mb-3">Simulation Results</h6>
+                            <pre id="simulationJson" class="bg-dark p-3 rounded" style="max-height: 300px; overflow-y: auto;"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>""")
     
@@ -959,6 +1179,13 @@ def dash():
     html_parts.append("""
     <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // Load policy history
+        loadPolicyHistory();
+        
+        // Load project list
+        loadProjects();
+        
+        // Session inspector form handler
         document.getElementById('sessionForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const sessionId = document.getElementById('sessionId').value.trim();
@@ -976,7 +1203,186 @@ def dash():
                     alert('Error loading session: ' + error);
                 });
         });
+        
+        // Policy simulation form handler
+        document.getElementById('simulationForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const modelId = document.getElementById('simulationModel').value.trim();
+            const toolName = document.getElementById('simulationTool').value.trim();
+            const payloadText = document.getElementById('simulationPayload').value.trim();
+            
+            if (!modelId || !toolName) {
+                alert('Please enter both Model ID and Tool Name');
+                return;
+            }
+            
+            let payload = {};
+            if (payloadText) {
+                try {
+                    payload = JSON.parse(payloadText);
+                } catch (error) {
+                    alert('Invalid JSON payload: ' + error.message);
+                    return;
+                }
+            }
+            
+            // Prepare simulation data
+            const simulationData = {
+                model_id: modelId,
+                tool: toolName,
+                input: payload,
+                session_id: 'simulation-' + Date.now()
+            };
+            
+            // Call simulation API
+            fetch('/api/simulate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(simulationData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                const resultsDiv = document.getElementById('simulationResults');
+                const jsonPre = document.getElementById('simulationJson');
+                jsonPre.textContent = JSON.stringify(data, null, 2);
+                resultsDiv.style.display = 'block';
+            })
+            .catch(error => {
+                alert('Simulation error: ' + error.message);
+            });
+        });
+        
+        // Project switcher form handler
+        document.getElementById('projectSwitcher').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const projectId = document.getElementById('projectId').value;
+            if (!projectId) return;
+            
+            // Redirect to same page with project parameter
+            window.location.href = window.location.pathname + '?project=' + encodeURIComponent(projectId);
+        });
     });
+    
+    // Function to load policy history
+    function loadPolicyHistory() {
+        const historyDiv = document.getElementById('policyHistory');
+        
+        fetch('/api/policy/history')
+            .then(response => response.json())
+            .then(data => {
+                if (!data.history || data.history.length === 0) {
+                    historyDiv.innerHTML = '<div class="alert alert-info">No policy history found.</div>';
+                    return;
+                }
+                
+                // Create history table
+                let tableHtml = `
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Date/Time</th>
+                                <th>Policy File</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                
+                // Add rows for each history item
+                data.history.forEach(item => {
+                    tableHtml += `
+                    <tr>
+                        <td>${item.datetime}</td>
+                        <td>${item.filename}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-warning rollback-btn" 
+                                    data-timestamp="${item.timestamp}"
+                                    onclick="rollbackPolicy(${item.timestamp})">
+                                Rollback
+                            </button>
+                        </td>
+                    </tr>`;
+                });
+                
+                tableHtml += `
+                        </tbody>
+                    </table>
+                </div>`;
+                
+                historyDiv.innerHTML = tableHtml;
+            })
+            .catch(error => {
+                historyDiv.innerHTML = `<div class="alert alert-danger">Error loading policy history: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to load projects
+    function loadProjects() {
+        const selectElement = document.getElementById('projectId');
+        
+        fetch('/api/projects')
+            .catch(() => {
+                // If API not implemented yet, we'll just use default
+                console.log('Project API not implemented yet');
+                return { projects: ['default'] };
+            })
+            .then(response => {
+                if (response.projects) return response;
+                return response.json();
+            })
+            .then(data => {
+                // Clear options except default
+                while (selectElement.options.length > 1) {
+                    selectElement.remove(1);
+                }
+                
+                // Add options for each project
+                if (data.projects) {
+                    data.projects.forEach(project => {
+                        if (project === 'default') return; // Skip default which is already there
+                        
+                        const option = document.createElement('option');
+                        option.value = project;
+                        option.text = project;
+                        selectElement.add(option);
+                    });
+                }
+                
+                // Set current project based on URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const currentProject = urlParams.get('project');
+                if (currentProject) {
+                    selectElement.value = currentProject;
+                }
+            });
+    }
+    
+    // Function to rollback to a policy version
+    function rollbackPolicy(timestamp) {
+        if (!confirm('Are you sure you want to rollback to this policy version? This will overwrite the current policy file.')) {
+            return;
+        }
+        
+        fetch('/api/policy/rollback/' + timestamp, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert('Policy rolled back successfully: ' + data.message);
+                // Reload the page to reflect the changes
+                window.location.reload();
+            } else {
+                alert('Error rolling back policy: ' + (data.error || data.message || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            alert('Error rolling back policy: ' + error.message);
+        });
+    }
     </script>
 </body>
 </html>""")

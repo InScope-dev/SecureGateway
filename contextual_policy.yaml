@@ -1,23 +1,25 @@
-# Contextual Policy Rules
-# These rules are evaluated after basic policy checks
-# They can block tool calls based on session context
+# Contextual policies for MCP-Sec Gateway
+# These policies are evaluated based on session context
+# and can make more sophisticated security decisions
+- name: "No file.write after denied attempts"
+  conditions:
+    - type: "previous_denial"
+      tool: "file.write"
+      count: 1
+      window_seconds: 3600
+  action:
+    deny_tools: 
+      - "file.write"
+    reason: "File write blocked after previous denial"
 
-- when_tool: "db.write_sensitive"
-  block_if_prompt_contains:
-    - "internal"
-    - "exfiltrate"
-    - "steal"
-    - "bypass"
-    - "hack"
-  block_if_previous_denials: 1
-  require_prior_successful_tool: "search.query"
-
-- when_tool: "calendar.create_event"
-  require_prior_successful_tool: "search.web"
-  
-- when_tool: "file.write"
-  block_if_prompt_contains:
-    - "malware"
-    - "virus"
-    - "exploit"
-  block_if_previous_denials: 2
+- name: "No system operations after suspicious tool use"
+  conditions:
+    - type: "previous_call"
+      tool_pattern: "file.*"
+      count: 3
+      window_seconds: 60
+  action:
+    deny_tools:
+      - "system.*"
+      - "execute.*"
+    reason: "System operations blocked due to suspicious tool usage pattern"
