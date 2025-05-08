@@ -15,6 +15,9 @@ class FallbackCatalog:
     def load_schema(self, tool_name: str, schema_type: str) -> Optional[Dict[str, Any]]:
         return None
     
+    def get_tool_schema(self, tool_name: str, schema_type: str) -> Optional[Dict[str, Any]]:
+        return None
+    
     def clear_cache(self) -> None:
         pass
 
@@ -24,8 +27,19 @@ USE_CATALOG = False
 
 # Try to import tools catalog
 try:
-    from tools_catalog import catalog
+    from tools_catalog.catalog import get_tool_schema, get_tool_metadata, clear_cache
+    
+    # Create an adapter that matches our expected interface
+    class CatalogAdapter:
+        def get_tool_schema(self, tool_name: str, schema_type: str) -> Optional[Dict[str, Any]]:
+            return get_tool_schema(tool_name, schema_type)
+            
+        def clear_cache(self) -> None:
+            clear_cache()
+    
+    catalog = CatalogAdapter()
     USE_CATALOG = True
+    
 except ImportError:
     # Module not available
     pass
@@ -54,7 +68,7 @@ def _load_schema(tool_name: str, schema_type: str = "input") -> Optional[Dict[st
     # Try to load from tools catalog first
     if USE_CATALOG:
         try:
-            schema = catalog.load_schema(tool_name, schema_type)
+            schema = catalog.get_tool_schema(tool_name, schema_type)
             if schema:
                 return schema
             # If not found, fall back to legacy method
