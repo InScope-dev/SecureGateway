@@ -1,18 +1,21 @@
-# Trusted Peers Registry
-# Defines peer gateways that are authorized for federation
+# MCP-Sec Gateway - Trusted Peers Configuration
+# Federation support for cross-gateway tool call forwarding
 
+# ID uniquely identifies a peer in your logs and for referencing
+# URL is the endpoint to forward requests to
+# Key is the shared secret that must be provided in X-Gateway-Key header
 peers:
-  gw-beta:
-    url: "https://beta.example.com/forward"
-    key: "shared-key-123"
-    description: "Beta environment gateway"
-  
-  gw-internal:
-    url: "http://localhost:5002/forward"
-    key: "local-dev"
-    description: "Internal development gateway"
-  
-  gw-production:
-    url: "https://production.example.com/forward"
-    key: "prod-gateway-key"
-    description: "Production environment gateway"
+  prod-west:
+    url: "https://prod-west.example.com/federation/forward"
+    key: "shared-secret-key-prod-west"
+    description: "Production Gateway - West Region"
+    
+  prod-east:
+    url: "https://prod-east.example.com/federation/forward"
+    key: "shared-secret-key-prod-east"
+    description: "Production Gateway - East Region"
+    
+  staging:
+    url: "https://staging.example.com/federation/forward"
+    key: "shared-secret-key-staging"
+    description: "Staging Gateway for Pre-Release Testing"

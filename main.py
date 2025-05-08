@@ -1,6 +1,9 @@
 """
 MCP-Sec Gateway - Zero Trust Security Layer for Model Context Protocol
 Main entry point for the Flask application
+
+- Phase 4 enhancement: Federation support for cross-gateway trust
+- Phase 5 enhancement: Adaptive policy with session risk scoring & simulation
 """
 import datetime
 import glob
@@ -9,6 +12,7 @@ import logging
 import os
 import random
 import time
+import uuid
 from functools import wraps
 from typing import Dict, List, Union, Optional, Any, Tuple
 
@@ -17,9 +21,12 @@ from flask import Flask, request, jsonify, Response, render_template
 
 import audit_logger
 import mcp_routes
+from mcp_routes import load_trusted_peers, call_tool_api
 import policy_engine
+from policy_engine import check_policy, check_policy_contextual, simulate_shadow_policy
 import schema_validator
 import session_tracker
+from session_tracker import get_context, score_session
 from rate_limiter import reset_limits
 
 logging.basicConfig(level=logging.INFO, 
@@ -1402,6 +1409,195 @@ def dash():
     
     # Join all parts
     return "".join(html_parts)
+
+@app.route("/federation/forward", methods=["POST"])
+def federation_forward():
+    """
+    Handle requests forwarded from trusted peer gateways
+    
+    This endpoint:
+    1. Validates the incoming request is from a trusted peer
+    2. Verifies the tool call against local policies
+    3. Executes the tool call if allowed
+    4. Returns the result back to the peer gateway
+    """
+    start_time = time.time()
+    
+    # Validate it's coming from a trusted peer via gateway key
+    gateway_key = request.headers.get("X-Gateway-Key")
+    if not gateway_key:
+        logger.warning("Federation forward request missing gateway key")
+        return jsonify({
+            "allowed": False,
+            "status": "error",
+            "reason": "Missing gateway key"
+        }), 401
+    
+    # Load trusted peers
+    peers = load_trusted_peers()
+    trusted_peer = None
+    for peer_id, peer_config in peers.items():
+        if gateway_key == peer_config.get("key"):
+            trusted_peer = peer_id
+            break
+    
+    if not trusted_peer:
+        logger.warning(f"Untrusted peer attempted federation request")
+        return jsonify({
+            "allowed": False,
+            "status": "error",
+            "reason": "Invalid gateway key"
+        }), 401
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "allowed": False,
+                "status": "error",
+                "reason": "Invalid JSON body"
+            }), 400
+            
+        # Validate required fields
+        for field in ["model_id", "session_id", "tool_name", "input"]:
+            if field not in data:
+                return jsonify({
+                    "allowed": False,
+                    "status": "error",
+                    "reason": f"Missing required field: {field}"
+                }), 400
+        
+        model_id = data["model_id"]
+        session_id = data["session_id"] 
+        tool_name = data["tool_name"]
+        input_data = data["input"]
+        trace_id = data.get("trace_id", str(uuid.uuid4()))
+        
+        # Include federation info in the session ID to avoid collisions
+        # with local sessions and for tracking purposes
+        federation_session_id = f"fed_{trusted_peer}_{session_id}"
+        
+        # Get or initialize session context
+        context = get_context(federation_session_id)
+        if not context:
+            # Initialize session with federation marker
+            session_tracker.init_session(federation_session_id, model_id, 
+                                        prompt=f"[FEDERATION] Request from peer: {trusted_peer}")
+            context = get_context(federation_session_id)
+        
+        # Check policies - local policies always take precedence
+        allowed, reason = check_policy(model_id, tool_name, federation_session_id)
+        if not allowed:
+            logger.info(f"Federation request denied by basic policy: {reason}")
+            return jsonify({
+                "allowed": False,
+                "status": "denied",
+                "reason": f"Remote policy denial: {reason}",
+                "origin": "federation_policy"
+            })
+        
+        # Contextual policy check
+        contextual_decision = check_policy_contextual(model_id, tool_name, federation_session_id, context)
+        if not contextual_decision.get("allowed", True):
+            reason = contextual_decision.get("reason", "Denied by contextual policy")
+            logger.info(f"Federation request denied by contextual policy: {reason}")
+            return jsonify({
+                "allowed": False,
+                "status": "denied",
+                "reason": f"Remote contextual policy denial: {reason}",
+                "origin": "federation_contextual_policy"
+            })
+        
+        # Calculate risk score for this session
+        risk_score = score_session(federation_session_id)
+        
+        # Run shadow policy simulation
+        shadow_results = simulate_shadow_policy(model_id, tool_name, federation_session_id, context)
+        
+        # Execute the tool call
+        try:
+            tool_result = call_tool_api(tool_name, input_data)
+            
+            # Update session
+            session_tracker.update_tool_call(federation_session_id, tool_name, input_data, 
+                                           "allowed", output=tool_result)
+            
+            # Log the allowed federation request
+            audit_logger.log_event({
+                "model_id": model_id,
+                "session_id": federation_session_id,
+                "trace_id": trace_id,
+                "tool": tool_name,
+                "input": input_data,
+                "status": "allowed",
+                "federation": {
+                    "peer": trusted_peer,
+                    "original_session": session_id
+                },
+                "tool_result": tool_result,
+                "risk_score": risk_score,
+                "shadow_results": shadow_results,
+                "latency_ms": int((time.time() - start_time) * 1000)
+            })
+            
+            return jsonify({
+                "allowed": True,
+                "status": "allowed",
+                "result": tool_result,
+                "risk_score": risk_score,
+                "shadow_results": shadow_results,
+                "federation": {
+                    "source": "remote_execution",
+                    "gateway_id": os.environ.get("GATEWAY_ID", "mcp-gateway")
+                },
+                "latency_ms": int((time.time() - start_time) * 1000)
+            })
+            
+        except Exception as e:
+            reason = f"Tool error: {str(e)}"
+            logger.error(f"Federation tool execution error: {reason}")
+            
+            # Update session
+            session_tracker.update_tool_call(federation_session_id, tool_name, input_data, 
+                                           "error", reason=reason)
+            
+            # Log the federation error
+            audit_logger.log_event({
+                "model_id": model_id,
+                "session_id": federation_session_id,
+                "trace_id": trace_id,
+                "tool": tool_name,
+                "input": input_data,
+                "status": "error",
+                "federation": {
+                    "peer": trusted_peer,
+                    "original_session": session_id
+                },
+                "reason": reason,
+                "risk_score": risk_score,
+                "shadow_results": shadow_results,
+                "latency_ms": int((time.time() - start_time) * 1000)
+            })
+            
+            return jsonify({
+                "allowed": False,
+                "status": "error",
+                "reason": f"Remote tool error: {reason}",
+                "risk_score": risk_score,
+                "federation": {
+                    "source": "remote_execution",
+                    "gateway_id": os.environ.get("GATEWAY_ID", "mcp-gateway")
+                },
+                "latency_ms": int((time.time() - start_time) * 1000)
+            })
+            
+    except Exception as e:
+        logger.error(f"Error processing federation request: {str(e)}")
+        return jsonify({
+            "allowed": False,
+            "status": "error",
+            "reason": f"Remote gateway error: {str(e)}"
+        }), 500
 
 # Register the MCP routes
 app.register_blueprint(mcp_routes.mcp_bp)
