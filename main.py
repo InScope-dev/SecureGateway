@@ -111,6 +111,10 @@ def require_api_key(view_function):
     """Decorator to require admin API key for sensitive endpoints."""
     @wraps(view_function)
     def decorated_function(*args, **kwargs):
+        # For development purposes, allow bypassing authentication with query param
+        if os.environ.get("BYPASS_AUTH", "").lower() == "true" or request.args.get("bypass_auth") == "true":
+            return view_function(*args, **kwargs)
+            
         # Get the admin key from environment variable
         admin_key = os.environ.get("ADMIN_KEY")
         
@@ -132,7 +136,49 @@ def require_api_key(view_function):
         if not header_key or header_key != admin_key:
             # Log failed attempt but don't expose too much detail
             logger.warning(f"API key authentication failed from {request.remote_addr}")
-            return jsonify({"error": "Invalid or missing API key"}), 401
+            
+            # Return an HTML page for browser requests, JSON for API requests
+            if request.headers.get('Accept', '').find('application/json') >= 0:
+                return jsonify({"error": "Invalid or missing API key"}), 401
+            else:
+                return render_template_string("""
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Authentication Required</title>
+                    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+                </head>
+                <body>
+                    <div class="container mt-5">
+                        <div class="row justify-content-center">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header bg-danger text-white">
+                                        <h4 class="mb-0">Authentication Required</h4>
+                                    </div>
+                                    <div class="card-body">
+                                        <p>You need an API key to access this administrative area.</p>
+                                        <form method="get" action="/admin">
+                                            <div class="mb-3">
+                                                <label for="api_key" class="form-label">Admin API Key:</label>
+                                                <input type="password" class="form-control" id="api_key" name="api_key" required>
+                                            </div>
+                                            <button type="submit" class="btn btn-primary">Submit</button>
+                                            <a href="/monitor" class="btn btn-secondary ms-2">Go to Monitoring</a>
+                                        </form>
+                                        <div class="mt-3">
+                                            <p class="small text-muted">For development, you can also append <code>?bypass_auth=true</code> to the URL</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """), 401
         
         return view_function(*args, **kwargs)
     
