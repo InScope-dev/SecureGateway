@@ -578,26 +578,42 @@ def monitor():
         }
         formatted_logs.append(formatted_log)
     
-    # Render dashboard
+    # Render dashboard with a distinct monitoring style
     return render_template_string("""
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCP-Sec Monitoring</title>
+    <title>MCP-Sec Monitoring View</title>
     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
         .status-allowed { background-color: rgba(40, 167, 69, 0.2); }
         .status-denied { background-color: rgba(220, 53, 69, 0.2); }
         .status-error { background-color: rgba(255, 193, 7, 0.2); }
+        .monitor-header { background-color: #0d6efd; color: white; }
+        .monitor-badge { 
+            position: fixed; 
+            top: 0; 
+            right: 0; 
+            background: #0d6efd; 
+            color: white; 
+            padding: 5px 15px; 
+            z-index: 1000; 
+        }
     </style>
 </head>
 <body>
+    <div class="monitor-badge">MONITOR MODE</div>
+    
     <div class="container-fluid p-4">
-        <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center">
-            <h1 class="h3">MCP-Sec Gateway Monitoring</h1>
-            <div>
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card monitor-header">
+                    <div class="card-body d-flex justify-content-between align-items-center">
+                        <h2 class="mb-0">MCP-Sec Gateway Monitoring</h2>
+                        <div>
                 <a href="/" class="btn btn-sm btn-outline-secondary me-2">Home</a>
                 <a href="/admin" class="btn btn-sm btn-outline-danger">Admin Panel</a>
             </div>
