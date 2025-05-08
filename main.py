@@ -776,8 +776,11 @@ def dash():
             "reason": log.get("reason", "")
         })
     
-    # Simple render_template replacement
-    return f"""<!DOCTYPE html>
+    # Main HTML content
+    html_parts = []
+    
+    # Start of HTML
+    html_parts.append(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -834,8 +837,10 @@ def dash():
                     </div>
                 </div>
             </div>
-        </div>
-
+        </div>""")
+    
+    # Logs table
+    logs_table = """
         <div class="row mb-4">
             <div class="col-12">
                 <div class="card">
@@ -857,24 +862,35 @@ def dash():
                                         <th>Reason</th>
                                     </tr>
                                 </thead>
-                                <tbody>
-                                    {"".join([f'''
+                                <tbody>"""
+    
+    if formatted_logs:
+        for log in formatted_logs:
+            logs_table += f"""
                                     <tr class="status-{log['status']}">
                                         <td>{log['timestamp']}</td>
                                         <td>{log['model_id']}</td>
                                         <td>{log['tool']}</td>
                                         <td>{log['status']}</td>
                                         <td>{log['reason'] or ''}</td>
-                                    </tr>
-                                    ''' for log in formatted_logs]) if formatted_logs else '<tr><td colspan="5" class="text-center py-3">No audit logs found</td></tr>'}
+                                    </tr>"""
+    else:
+        logs_table += """
+                                    <tr><td colspan="5" class="text-center py-3">No audit logs found</td></tr>"""
+        
+    logs_table += """
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-
+        </div>"""
+    
+    html_parts.append(logs_table)
+    
+    # Policy management and schema validation
+    html_parts.append("""
         <div class="row">
             <div class="col-md-6 mb-4">
                 <div class="card">
@@ -913,9 +929,60 @@ def dash():
                 </div>
             </div>
         </div>
-    </div>
+        
+        <div class="row">
+            <div class="col-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Session Inspector</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="sessionForm" class="row g-3">
+                            <div class="col-md-8">
+                                <input type="text" class="form-control" id="sessionId" placeholder="Enter Session ID">
+                            </div>
+                            <div class="col-md-4">
+                                <button type="submit" class="btn btn-primary w-100">View Session</button>
+                            </div>
+                        </form>
+                        <div id="sessionDetails" class="mt-3" style="display:none;">
+                            <h6 class="border-bottom pb-2 mb-3">Session Details</h6>
+                            <pre id="sessionJson" class="bg-dark p-3 rounded" style="max-height: 300px; overflow-y: auto;"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>""")
+    
+    # JavaScript
+    html_parts.append("""
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('sessionForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const sessionId = document.getElementById('sessionId').value.trim();
+            if (!sessionId) return;
+            
+            fetch('/api/session/' + sessionId)
+                .then(response => response.json())
+                .then(data => {
+                    const sessionDetails = document.getElementById('sessionDetails');
+                    const sessionJson = document.getElementById('sessionJson');
+                    sessionJson.textContent = JSON.stringify(data, null, 2);
+                    sessionDetails.style.display = 'block';
+                })
+                .catch(error => {
+                    alert('Error loading session: ' + error);
+                });
+        });
+    });
+    </script>
 </body>
-</html>"""
+</html>""")
+    
+    # Join all parts
+    return "".join(html_parts)
 
 # Register the MCP routes
 app.register_blueprint(mcp_routes.mcp_bp)

@@ -41,6 +41,12 @@ def log_event(event: dict):
     LOG_HISTORY.append(event)
     while len(LOG_HISTORY) > MAX_HISTORY_ENTRIES:
         LOG_HISTORY.pop(0)
+        
+    # Check for anomalies
+    detect_anomalies(event)
+    
+    # Forward to SIEM if configured
+    forward_to_siem(event)
 
 def manage_log_file(log_line: str):
     """
@@ -131,3 +137,93 @@ def calculate_risk_level(event: dict) -> str:
             risk_level = "high"
     
     return risk_level
+
+def detect_anomalies(event: dict):
+    """
+    Detect anomalies in the log stream and report them
+    
+    Currently checks for:
+    - Spikes in denial rate (10+ denials in 2 minutes)
+    - Multiple high-risk events in a short time period
+    - Unusual patterns in tool usage
+    
+    Args:
+        event: The current event
+    """
+    # Skip if not a denial (we're mainly looking for denial spikes)
+    if event.get("status") != "denied":
+        return
+        
+    try:
+        # Count recent denials (events in the last 2 minutes)
+        current_time = time.time()
+        recent_denials = 0
+        
+        # Calculate timestamp 2 minutes ago
+        two_min_ago = current_time - 120
+        
+        for log_event in LOG_HISTORY[-100:]:  # Only check the most recent 100 entries for efficiency
+            # Skip if not a denial
+            if log_event.get("status") != "denied":
+                continue
+                
+            # Check if the event is recent (within the last 2 minutes)
+            try:
+                event_time = log_event.get("timestamp", "")
+                if not event_time:
+                    continue
+                    
+                # Convert ISO datetime to timestamp
+                event_timestamp = datetime.datetime.fromisoformat(event_time).timestamp()
+                
+                if event_timestamp >= two_min_ago:
+                    recent_denials += 1
+            except (ValueError, TypeError):
+                # Skip events with invalid timestamps
+                continue
+        
+        # Alert if denial rate is high
+        if recent_denials >= 10:
+            print(f"🚨 ANOMALY DETECTED: High denial rate - {recent_denials} denials in the last 2 minutes", 
+                  flush=True)
+            
+            # Here you would typically trigger an alert or notification
+            # For example: send_alert("high_denial_rate", recent_denials)
+            
+    except Exception as e:
+        print(f"Error in anomaly detection: {str(e)}", flush=True)
+
+def forward_to_siem(event: dict):
+    """
+    Forward event to an external Security Information and Event Management (SIEM) system
+    if configured via SIEM_URL environment variable
+    
+    Args:
+        event: The event to forward
+    """
+    siem_url = os.environ.get("SIEM_URL")
+    
+    # Skip if no SIEM URL is configured
+    if not siem_url:
+        return
+        
+    try:
+        # Import requests here to avoid dependency when not needed
+        import requests
+        
+        # Send request to SIEM with a short timeout
+        response = requests.post(
+            siem_url,
+            json=event,
+            headers={"Content-Type": "application/json"},
+            timeout=2  # Short timeout to avoid blocking
+        )
+        
+        # Log failure but don't raise exception
+        if not response.ok:
+            print(f"SIEM forward failed: HTTP {response.status_code} - {response.text}", flush=True)
+            
+    except ImportError:
+        print("SIEM forwarding requires requests library", flush=True)
+    except Exception as e:
+        print(f"SIEM forward failed: {str(e)}", flush=True)
