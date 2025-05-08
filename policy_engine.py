@@ -395,6 +395,7 @@ def check_policy_contextual(model_id: str, tool_name: str, session_id: str, cont
     - Prompt content
     - Prior denials
     - Tool usage sequence
+    - Session risk score
     
     Args:
         model_id: The ID of the model
@@ -415,7 +416,7 @@ def check_policy_contextual(model_id: str, tool_name: str, session_id: str, cont
     for rule in CONTEXTUAL_POLICIES:
         # Check if this rule applies to this tool
         when_tool = rule.get("when_tool", "")
-        if when_tool and not re.fullmatch(when_tool, tool_name):
+        if when_tool and not _match_pattern(tool_name, when_tool):
             continue
         
         # Block if prompt contains any forbidden phrases
@@ -437,9 +438,144 @@ def check_policy_contextual(model_id: str, tool_name: str, session_id: str, cont
                        for c in calls)
             if not found:
                 return {"allowed": False, "reason": f"Missing required prior tool: {required_tool}"}
+        
+        # Check for call rate limits per session
+        if "max_calls_per_session" in rule:
+            max_calls = rule["max_calls_per_session"]
+            matching_calls = sum(1 for c in calls if _match_pattern(c.get("tool", ""), when_tool))
+            if matching_calls >= max_calls:
+                return {"allowed": False, "reason": f"Exceeded maximum calls per session ({max_calls}) for this tool type"}
+        
+        # Check for call rate limits per minute
+        if "max_calls_per_minute" in rule:
+            max_calls = rule["max_calls_per_minute"]
+            now = time.time()
+            one_minute_ago = now - 60
+            recent_matching_calls = sum(1 for c in calls if 
+                                      _match_pattern(c.get("tool", ""), when_tool) and 
+                                      c.get("timestamp", 0) >= one_minute_ago)
+            if recent_matching_calls >= max_calls:
+                return {"allowed": False, "reason": f"Rate limit exceeded: maximum {max_calls} calls per minute"}
+        
+        # Check session risk score if available
+        if "block_if_session_risk_above" in rule:
+            # Import here to avoid circular imports
+            from session_tracker import score_session
+            risk_threshold = rule["block_if_session_risk_above"]
+            session_risk = score_session(session_id)
+            if session_risk > risk_threshold:
+                return {"allowed": False, "reason": f"Session risk score too high: {session_risk:.2f} > {risk_threshold}"}
     
     # All contextual rules passed
     return {"allowed": True}
+
+def simulate_shadow_policy(model_id: str, tool_name: str, session_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Simulate policy decisions using shadow mode rules
+    
+    These rules are evaluated but not enforced, allowing for:
+    - Testing new rules before enforcement
+    - Collecting metrics on potential policy changes
+    - Adaptive policy refinement
+    - Identifying false positives/negatives
+    
+    Args:
+        model_id: The ID of the model
+        tool_name: The name of the tool being called
+        session_id: The ID of the current session
+        context: Session context data
+        
+    Returns:
+        Dict with simulation results
+    """
+    # Load shadow policies from preview file
+    try:
+        with open("contextual_policy.preview.yaml", "r") as f:
+            shadow_policies = yaml.safe_load(f)
+            if shadow_policies is None:
+                shadow_policies = []
+    except Exception as e:
+        logger.error(f"Error loading shadow policies: {str(e)}")
+        return {"simulated": False, "error": str(e)}
+    
+    prompt = context.get("prompt", "")
+    calls = context.get("tool_calls", [])
+    results = {"simulated": True, "would_allow": True, "triggered_rules": []}
+    
+    for rule in shadow_policies:
+        # Skip rules that don't apply to this tool
+        when_tool = rule.get("when_tool", "")
+        if when_tool and not _match_pattern(tool_name, when_tool):
+            continue
+        
+        rule_name = rule.get("name", "Unnamed rule")
+        triggered = False
+        trigger_reason = ""
+        
+        # Check all the same conditions as in check_policy_contextual
+        # Block if prompt contains any forbidden phrases
+        for phrase in rule.get("block_if_prompt_contains", []):
+            if phrase.lower() in prompt.lower():
+                triggered = True
+                trigger_reason = f"Prompt contains blocked phrase: '{phrase}'"
+                break
+        
+        # Block if N or more previous denials in session
+        if not triggered and "block_if_previous_denials" in rule:
+            max_denials = rule["block_if_previous_denials"]
+            denials = sum(1 for c in calls if c.get("status") == "denied")
+            if denials >= max_denials:
+                triggered = True
+                trigger_reason = f"Too many prior denials in session ({denials})"
+        
+        # Block if required prior tool not used successfully
+        if not triggered and "require_prior_successful_tool" in rule:
+            required_tool = rule["require_prior_successful_tool"]
+            found = any(c.get("tool") == required_tool and c.get("status") == "allowed" 
+                       for c in calls)
+            if not found:
+                triggered = True
+                trigger_reason = f"Missing required prior tool: {required_tool}"
+        
+        # Check for call rate limits per session
+        if not triggered and "max_calls_per_session" in rule:
+            max_calls = rule["max_calls_per_session"]
+            matching_calls = sum(1 for c in calls if _match_pattern(c.get("tool", ""), when_tool))
+            if matching_calls >= max_calls:
+                triggered = True
+                trigger_reason = f"Exceeded maximum calls per session ({max_calls}) for this tool type"
+        
+        # Check for call rate limits per minute
+        if not triggered and "max_calls_per_minute" in rule:
+            max_calls = rule["max_calls_per_minute"]
+            now = time.time()
+            one_minute_ago = now - 60
+            recent_matching_calls = sum(1 for c in calls if 
+                                      _match_pattern(c.get("tool", ""), when_tool) and 
+                                      c.get("timestamp", 0) >= one_minute_ago)
+            if recent_matching_calls >= max_calls:
+                triggered = True
+                trigger_reason = f"Rate limit exceeded: maximum {max_calls} calls per minute"
+        
+        # Check session risk score if available
+        if not triggered and "block_if_session_risk_above" in rule:
+            # Import here to avoid circular imports
+            from session_tracker import score_session
+            risk_threshold = rule["block_if_session_risk_above"]
+            session_risk = score_session(session_id)
+            if session_risk > risk_threshold:
+                triggered = True
+                trigger_reason = f"Session risk score too high: {session_risk:.2f} > {risk_threshold}"
+        
+        # Record triggered rules
+        if triggered:
+            results["would_allow"] = False
+            results["triggered_rules"].append({
+                "rule": rule_name,
+                "reason": trigger_reason
+            })
+    
+    return results
 
 def _match_pattern(value: str, pattern: str) -> bool:
     """

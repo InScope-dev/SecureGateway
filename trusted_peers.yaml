@@ -1,0 +1,18 @@
+# Trusted Peers Registry
+# Defines peer gateways that are authorized for federation
+
+peers:
+  gw-beta:
+    url: "https://beta.example.com/forward"
+    key: "shared-key-123"
+    description: "Beta environment gateway"
+  
+  gw-internal:
+    url: "http://localhost:5002/forward"
+    key: "local-dev"
+    description: "Internal development gateway"
+  
+  gw-production:
+    url: "https://production.example.com/forward"
+    key: "prod-gateway-key"
+    description: "Production environment gateway"

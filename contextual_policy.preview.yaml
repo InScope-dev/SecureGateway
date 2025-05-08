@@ -1,0 +1,39 @@
+# Shadow Mode Contextual Policy - Preview Rules
+# These rules will be simulated but not enforced
+# Used for testing and tuning new policy rules
+
+- when_tool: "db.*"
+  block_if_prompt_contains:
+    - "drop table"
+    - "delete all"
+    - "destroy"
+  require_prior_successful_tool: "auth.verify"
+  name: "Database operations require prior authentication"
+
+- when_tool: "*.delete*"
+  block_if_previous_denials: 3
+  name: "Block delete operations after 3 denied operations in same session"
+
+- when_tool: "*"
+  block_if_prompt_contains:
+    - "bypass"
+    - "hack"
+    - "exploit"
+    - "vulnerability"
+  name: "Block tools that follow prompts with hacking language"
+
+- when_tool: "system.*"
+  block_if_session_risk_above: 0.6
+  name: "Block system tools for high-risk sessions"
+
+- when_tool: "*.write*"
+  max_calls_per_session: 5
+  name: "Limit write operations to 5 per session"
+
+- when_tool: "calendar.*"
+  max_calls_per_minute: 10
+  name: "Rate limit calendar operations to prevent abuse"
+
+- when_tool: "email.*"
+  require_prior_successful_tool: "auth.verify"
+  name: "Email operations require prior authentication"

@@ -1,0 +1,142 @@
+ Phase 4 + 5 (Federation + Adaptive Policy)
+🎯 Goal
+Extend SecureGateway to:
+
+🔁 Forward ToolCalls across gateways for federated trust
+
+📛 Authenticate peer gateways via X-Gateway-Key and trusted_peers.yaml
+
+📊 Add session scoring + risk analysis
+
+🌘 Enable shadow policy simulation (non-blocking)
+
+🤖 Suggest new rules based on log patterns
+
+🔹 1. Add trusted_peers.yaml (Peer Trust Registry)
+yaml
+Copy
+Edit
+peers:
+  gw-beta:
+    url: "https://beta.example.com/forward"
+    key: "shared-key-123"
+  gw-internal:
+    url: "http://localhost:5002/forward"
+    key: "local-dev"
+🔹 2. Modify mcp_routes.py to Support Forwarding
+Function to forward a ToolCall:
+
+python
+Copy
+Edit
+def forward_toolcall(peer_id, payload):
+    with open("trusted_peers.yaml") as f:
+        config = yaml.safe_load(f)
+    peer = config["peers"][peer_id]
+    headers = {"X-Gateway-Key": peer["key"], "X-Trace-Id": payload.get("trace_id", str(uuid4()))}
+    res = requests.post(peer["url"], json=payload, headers=headers)
+    return res.status_code, res.json()
+In /mcp/toolcall, allow conditional forwarding:
+
+python
+Copy
+Edit
+if decision["allowed"] and "forward_to" in request.headers:
+    peer_id = request.headers["forward_to"]
+    status, remote_decision = forward_toolcall(peer_id, {
+        **body,
+        "trace_id": str(uuid4()),
+        "original_decision": decision
+    })
+    response.update(remote_decision)
+🔹 3. Add /forward Route to Accept Remote Calls
+python
+Copy
+Edit
+@app.post("/forward")
+def forward():
+    data = request.json
+    key = request.headers.get("X-Gateway-Key")
+    trace = request.headers.get("X-Trace-Id", str(uuid4()))
+    with open("trusted_peers.yaml") as f:
+        peers = yaml.safe_load(f)["peers"]
+    if key not in [p["key"] for p in peers.values()]:
+        return {"status": "unauthorized"}, 401
+
+    # Optionally re-check policy locally
+    ctx = get_context(data["session_id"])
+    decision = check_policy_basic(...)
+    if decision["allowed"]:
+        decision = check_policy_contextual(...)
+
+    decision["trace_id"] = trace
+    return jsonify(decision)
+🔹 4. Add Session Scoring (Phase 5)
+In session_tracker.py, add:
+
+python
+Copy
+Edit
+def score_session(session_id):
+    ctx = SESSION_STATE.get(session_id)
+    if not ctx: return 0.0
+
+    score = 0
+    if len(ctx["tool_calls"]) > 5:
+        score += 0.2
+    if any("write" in c["tool"] for c in ctx["tool_calls"]):
+        score += 0.3
+    if any(c["status"] == "denied" for c in ctx["tool_calls"]):
+        score += 0.2
+    return min(score, 1.0)
+In /mcp/toolcall, add to the final response:
+
+python
+Copy
+Edit
+response["risk_score"] = score_session(session_id)
+🔹 5. Add Shadow Mode Policy Simulation
+In check_policy_contextual(...), simulate with preview logic:
+
+python
+Copy
+Edit
+def simulate_shadow_policy(tool_name, context):
+    shadow_policy = load_contextual_policies("contextual_policy.preview.yaml")
+    # Same logic as check_policy_contextual, but no enforcement
+    return evaluate_against(shadow_policy, tool_name, context)
+Add to logs:
+
+python
+Copy
+Edit
+event["shadow_result"] = simulate_shadow_policy(tool_name, context)
+🔹 6. Add /api/policy/suggest for Policy Proposals
+python
+Copy
+Edit
+@app.get("/api/policy/suggest")
+def suggest():
+    tool_counts = {}
+    for e in LOG_HISTORY:
+        if e["status"] == "denied":
+            tool = e["tool"]
+            tool_counts[tool] = tool_counts.get(tool, 0) + 1
+
+    suggestions = []
+    for tool, count in tool_counts.items():
+        if count > 5:
+            suggestions.append({
+                "tool": tool,
+                "suggested_action": "deny",
+                "reason": f"{count} denials in audit logs"
+            })
+
+    return jsonify(suggestions)
+✅ Commit with:
+bash
+Copy
+Edit
+git add .
+git commit -m "feat: Phase 4+5 – federation, trace_id, session scoring, shadow policy, rule suggestions"
+git push origin main

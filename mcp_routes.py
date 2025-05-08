@@ -1,26 +1,93 @@
 """
 MCP-Sec Gateway - Core request handler for Flask
 This module provides the routes for handling MCP traffic
+
+- Phase 4 enhancement: Federation support for forwarding requests to trusted peer gateways
+- Phase 5 enhancement: Shadow mode policy simulation and session risk scoring
 """
 import time
 import os
+import uuid
+import yaml
 import logging
 import requests
 from flask import Blueprint, request, jsonify
 from fnmatch import fnmatch
+from typing import Dict, Any, Tuple, Optional
 
 import policy_engine
-from policy_engine import check_policy, check_policy_contextual, validate_model_key
+from policy_engine import check_policy, check_policy_contextual, validate_model_key, simulate_shadow_policy
 from rate_limiter import check_limit, RateLimitError
 from schema_validator import validate_input, validate_output, SchemaValidationError
 from audit_logger import log_event
-from session_tracker import init_session, update_tool_call, get_context
+from session_tracker import init_session, update_tool_call, get_context, score_session
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
 # Configure tool server URL - default to internal mock endpoints
 TOOL_SERVER_URL = os.getenv("TOOL_SERVER_URL", None)
+
+def load_trusted_peers() -> Dict[str, Dict[str, str]]:
+    """
+    Load trusted peer gateways from configuration file
+    
+    Returns:
+        Dictionary of peer configurations
+    """
+    try:
+        with open("trusted_peers.yaml", "r") as f:
+            config = yaml.safe_load(f)
+            if not config or "peers" not in config:
+                logger.warning("No trusted peers found in configuration")
+                return {}
+            return config["peers"]
+    except FileNotFoundError:
+        logger.warning("trusted_peers.yaml not found")
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading trusted peers: {str(e)}")
+        return {}
+
+def forward_toolcall(peer_id: str, payload: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """
+    Forward a tool call to a trusted peer gateway
+    
+    Args:
+        peer_id: ID of the peer gateway
+        payload: Request payload to forward
+        
+    Returns:
+        Tuple of (status_code, response_json)
+    """
+    peers = load_trusted_peers()
+    if peer_id not in peers:
+        logger.error(f"Attempted to forward to unknown peer: {peer_id}")
+        return 404, {"status": "error", "reason": f"Unknown peer: {peer_id}"}
+    
+    peer = peers[peer_id]
+    trace_id = str(uuid.uuid4())
+    headers = {
+        "X-Gateway-Key": peer["key"],
+        "X-Trace-Id": payload.get("trace_id", trace_id),
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        logger.info(f"Forwarding request to peer {peer_id} at {peer['url']}")
+        res = requests.post(
+            peer["url"],
+            json=payload,
+            headers=headers,
+            timeout=10  # Longer timeout for inter-gateway communication
+        )
+        return res.status_code, res.json()
+    except requests.RequestException as e:
+        logger.error(f"Error forwarding to peer {peer_id}: {str(e)}")
+        return 500, {"status": "error", "reason": f"Forward error: {str(e)}"}
+    except Exception as e:
+        logger.error(f"Unexpected error in forward: {str(e)}")
+        return 500, {"status": "error", "reason": "Internal forward error"}
 
 def call_tool_api(tool_name, payload):
     """Call external tool service if allowed."""
@@ -304,14 +371,96 @@ def tool_call():
         
         # If we've made it this far, the request is allowed
         response["allowed"] = True
+        response["status"] = "allowed"
         
-        # 5. Call the tool API
+        # 5. Run shadow policy simulation (non-blocking)
+        shadow_results = simulate_shadow_policy(model_id, tool_name, session_id, context)
+        
+        # 6. Add session risk score
+        risk_score = score_session(session_id)
+        response["risk_score"] = risk_score
+        
+        # 7. Check if we need to forward to another gateway
+        forward_to = request.headers.get("X-Forward-To")
+        if forward_to:
+            logger.info(f"Forwarding tool call to peer gateway: {forward_to}")
+            
+            # Prepare the forwarded payload
+            forward_payload = {
+                "model_id": model_id,
+                "session_id": session_id,
+                "tool_name": tool_name,
+                "input": input_data,
+                "trace_id": str(uuid.uuid4()),
+                "original_decision": {
+                    "allowed": True,
+                    "risk_score": risk_score,
+                    "shadow_results": shadow_results
+                }
+            }
+            
+            # Forward the request
+            status_code, remote_response = forward_toolcall(forward_to, forward_payload)
+            
+            # Handle the response
+            if status_code == 200 and remote_response.get("allowed", False):
+                # Merge remote response with our response
+                response.update(remote_response)
+                
+                # Log the forwarded event
+                latency_ms = int((time.time() - start_time) * 1000)
+                log_event({
+                    "model_id": model_id,
+                    "session_id": session_id,
+                    "tool": tool_name,
+                    "input": input_data,
+                    "status": "forwarded",
+                    "forwarded_to": forward_to,
+                    "remote_response": remote_response,
+                    "risk_score": risk_score,
+                    "shadow_results": shadow_results,
+                    "latency_ms": latency_ms
+                })
+                # Update session tracker
+                update_tool_call(session_id, tool_name, input_data, "forwarded", 
+                                output=remote_response.get("result"))
+                
+                response["latency_ms"] = int((time.time() - start_time) * 1000)
+                return jsonify(response)
+            else:
+                # Remote gateway denied or error
+                response["allowed"] = False
+                response["status"] = "denied"
+                response["reason"] = f"Remote gateway denied: {remote_response.get('reason', 'Unknown reason')}"
+                
+                # Log the denied forward
+                latency_ms = int((time.time() - start_time) * 1000)
+                log_event({
+                    "model_id": model_id,
+                    "session_id": session_id,
+                    "tool": tool_name,
+                    "input": input_data,
+                    "status": "denied",
+                    "forward_attempted": True,
+                    "forwarded_to": forward_to,
+                    "reason": response["reason"],
+                    "risk_score": risk_score,
+                    "shadow_results": shadow_results,
+                    "latency_ms": latency_ms
+                })
+                # Update session tracker
+                update_tool_call(session_id, tool_name, input_data, "denied", 
+                                reason=response["reason"])
+                
+                response["latency_ms"] = int((time.time() - start_time) * 1000)
+                return jsonify(response)
+        
+        # 8. Call the tool API
         try:
             tool_result = call_tool_api(tool_name, input_data)
             response["result"] = tool_result
-            response["status"] = "allowed"
             
-            # Log the allowed event with tool result
+            # Log the allowed event with tool result and additional data
             latency_ms = int((time.time() - start_time) * 1000)
             log_event({
                 "model_id": model_id,
@@ -320,6 +469,8 @@ def tool_call():
                 "input": input_data,
                 "status": "allowed",
                 "tool_result": tool_result,
+                "risk_score": risk_score,
+                "shadow_results": shadow_results,
                 "latency_ms": latency_ms
             })
             # Update session tracker
@@ -329,7 +480,7 @@ def tool_call():
             response["status"] = "error"
             response["reason"] = reason
             
-            # Log the tool error
+            # Log the tool error with additional data
             latency_ms = int((time.time() - start_time) * 1000)
             log_event({
                 "model_id": model_id,
@@ -338,6 +489,8 @@ def tool_call():
                 "input": input_data,
                 "status": "error",
                 "reason": reason,
+                "risk_score": risk_score,
+                "shadow_results": shadow_results,
                 "latency_ms": latency_ms
             })
             # Update session tracker
