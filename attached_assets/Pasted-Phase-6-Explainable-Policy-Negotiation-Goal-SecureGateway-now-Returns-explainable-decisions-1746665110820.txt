@@ -1,0 +1,133 @@
+Phase 6 – Explainable Policy & Negotiation
+🎯 Goal
+SecureGateway now:
+
+Returns explainable decisions for every ToolCall (reasoning, rule_trace, risk_score)
+
+Accepts policy proposals from agents via /propose_policy
+
+Logs these proposals + approves or rejects based on defined guardrails
+
+Supports policy “contracts” signed by admins or agents (optional)
+
+🔹 1. Update /mcp/toolcall to Return Justifications
+In mcp_routes.py, extend the decision format:
+
+python
+Copy
+Edit
+decision = {
+  "allowed": True,
+  "reason": "Allowed by allow_tools match",
+  "rule_trace": ["check_tool_whitelist"],
+  "risk_score": 0.2,
+  "reasoning": [
+    "Model is allowed to use calendar.*",
+    "No schema violation",
+    "Prompt does not contain suspicious patterns",
+    "Session score: low risk"
+  ]
+}
+Log this whole decision into audit_logger.py as event["reasoning"].
+
+🔹 2. Add /propose_policy Endpoint
+Let models or admins propose YAML snippets to be merged into live policy:
+
+python
+Copy
+Edit
+@app.post("/api/propose_policy")
+@require_api_key
+def propose():
+    proposal = request.json
+    try:
+        new_yaml = yaml.safe_load(proposal["yaml"])
+    except:
+        return {"error": "Invalid YAML"}, 400
+
+    justification = proposal.get("justification", "")
+    model_id = proposal.get("model_id")
+
+    # Check if model is allowed to suggest rules (scoped by model_keys.yaml)
+    if not is_model_permitted_to_propose(model_id):
+        return {"status": "rejected", "reason": "model not authorized"}
+
+    log_event({
+        "type": "policy_proposal",
+        "model_id": model_id,
+        "yaml": proposal["yaml"],
+        "justification": justification,
+        "timestamp": time.time()
+    })
+
+    # Optional: auto-approve simple cases (e.g., allow read-only tools)
+    auto_approved = is_safe_policy(new_yaml)
+    if auto_approved:
+        merge_policy_yaml("policies.yaml", new_yaml)
+        reload_policies()
+        return {"status": "approved"}
+
+    return {"status": "pending", "review_required": True}
+🔹 3. Add is_model_permitted_to_propose() Helper
+python
+Copy
+Edit
+def is_model_permitted_to_propose(model_id):
+    with open("model_keys.yaml") as f:
+        keys = yaml.safe_load(f)
+    return keys["models"].get(model_id, {}).get("can_propose", False)
+Update model_keys.yaml:
+
+yaml
+Copy
+Edit
+models:
+  gpt-4o:
+    key: modelkey-abc123
+    tools: ["calendar.*"]
+    can_propose: true
+🔹 4. Add is_safe_policy() (Optional Guardrail)
+python
+Copy
+Edit
+def is_safe_policy(policy):
+    rules = policy.get("rules", [])
+    for r in rules:
+        if "db.write_sensitive" in r.get("allow_tools", []):
+            return False
+    return True
+🔹 5. Policy Contracts (Optional Signing)
+Add a command or route to sign accepted policies:
+
+python
+Copy
+Edit
+def sign_policy(yaml_str, key="supersecret"):
+    import hmac, hashlib
+    return hmac.new(key.encode(), yaml_str.encode(), hashlib.sha256).hexdigest()
+Log signature in audit log:
+
+python
+Copy
+Edit
+event["signature"] = sign_policy(proposed_yaml)
+✅ Commit:
+bash
+Copy
+Edit
+git add .
+git commit -m "feat: Phase 6 – explainable decisions, policy negotiation, agent proposals"
+git push origin main
+📊 Test It:
+bash
+Copy
+Edit
+curl -X POST /api/propose_policy \
+  -H "X-Admin-Key: ..." \
+  -d '{
+    "model_id": "gpt-4o",
+    "yaml": "rules:\n  - model: gpt-4o\n    allow_tools: [search.*]",
+    "justification": "needed for vendor analysis"
+  }'
+✅ Returns "status": "pending" or "approved"
+→ See in logs: full justification, proposal YAML, model ID, signature

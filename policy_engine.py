@@ -621,3 +621,136 @@ def _check_active_hours(active_hours: str) -> bool:
     except Exception as e:
         logger.error(f"Error parsing active hours '{active_hours}': {str(e)}")
         return False  # Fail closed
+        
+def is_model_permitted_to_propose(model_id: str) -> bool:
+    """
+    Check if a model is permitted to propose policy changes
+    
+    Args:
+        model_id: The ID of the model
+        
+    Returns:
+        True if the model is permitted to propose policy changes, False otherwise
+    """
+    if not model_id:
+        return False
+        
+    model_config = MODEL_KEYS.get("models", {}).get(model_id, {})
+    return model_config.get("can_propose", False)
+
+def is_safe_policy(policy: Dict[str, Any]) -> bool:
+    """
+    Check if a proposed policy is safe to automatically approve
+    
+    This function implements guardrails to prevent dangerous changes like:
+    - Adding highly privileged tools
+    - Removing important restrictions
+    - Changing security-critical settings
+    
+    Args:
+        policy: The policy to check
+        
+    Returns:
+        True if the policy is safe, False otherwise
+    """
+    # If there's no policy, it's not safe
+    if not policy:
+        return False
+        
+    # Check rules
+    rules = policy.get("rules", [])
+    
+    # Extract all tool patterns that would be allowed
+    all_tools = []
+    for rule in rules:
+        tools = rule.get("allow_tools", [])
+        all_tools.extend(tools)
+    
+    # Check for dangerous patterns
+    dangerous_patterns = [
+        "db.write", "db.delete", "file.write", "file.delete", 
+        "exec", "execute", "system", "shell", "admin", 
+        "network.external", "ssh", "credential", "password",
+        "auth.change", "security.bypass"
+    ]
+    
+    # Check if any dangerous patterns are in the allowed tools
+    for tool in all_tools:
+        for pattern in dangerous_patterns:
+            if pattern in tool:
+                return False
+    
+    # Safe patterns that are always allowed to be proposed
+    safe_patterns = [
+        "search", "query", "read", "view", "calendar", "email.read",
+        "calculate", "weather", "location.get", "translate"
+    ]
+    
+    # If all tools match safe patterns, approve automatically
+    all_safe = True
+    for tool in all_tools:
+        tool_is_safe = False
+        for pattern in safe_patterns:
+            if pattern in tool:
+                tool_is_safe = True
+                break
+        if not tool_is_safe:
+            all_safe = False
+            break
+    
+    return all_safe
+
+def sign_policy(yaml_str: str, key: str = None) -> str:
+    """
+    Sign a policy YAML string
+    
+    Args:
+        yaml_str: The YAML string to sign
+        key: The key to use for signing. Defaults to ADMIN_KEY
+        
+    Returns:
+        The signature as a hexadecimal string
+    """
+    import hmac
+    import hashlib
+    
+    if key is None:
+        key = os.environ.get("ADMIN_KEY", "supersecret")
+        
+    return hmac.new(key.encode(), yaml_str.encode(), hashlib.sha256).hexdigest()
+    
+def merge_policy_yaml(target_path: str, new_policy: Dict[str, Any]) -> bool:
+    """
+    Merge a new policy into an existing policy file
+    
+    Args:
+        target_path: Path to the existing policy file
+        new_policy: The new policy to merge
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # First, make a backup
+        backup_policy(target_path)
+        
+        # Read existing policy
+        existing_policy = {}
+        if os.path.exists(target_path):
+            with open(target_path, "r") as f:
+                existing_policy = yaml.safe_load(f) or {}
+        
+        # Merge the policies
+        if "rules" in new_policy:
+            if "rules" not in existing_policy:
+                existing_policy["rules"] = []
+            existing_policy["rules"].extend(new_policy["rules"])
+        
+        # Write merged policy
+        with open(target_path, "w") as f:
+            yaml.dump(existing_policy, f, default_flow_style=False)
+            
+        return True
+    except Exception as e:
+        logger.error(f"Error merging policy: {str(e)}")
+        return False

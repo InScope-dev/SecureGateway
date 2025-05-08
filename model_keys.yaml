@@ -7,6 +7,7 @@ models:
     description: "GPT-4 API (June 2023)"
     allowed_tools:
       - "*"  # Allow all tools
+    can_propose: true  # Can propose policy changes
     
   claude-3-opus:
     key: "claude3-test-key"

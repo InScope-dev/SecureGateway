@@ -382,6 +382,39 @@ def tool_call():
         risk_score = score_session(session_id)
         response["risk_score"] = risk_score
         
+        # 7. Add explanations and reasoning for decision
+        reasoning = []
+        rule_trace = []
+        
+        # Add reasoning about basic policy check
+        if "calendar" in tool_name:
+            reasoning.append(f"Model is allowed to use calendar.*")
+            rule_trace.append("check_tool_whitelist")
+        else:
+            reasoning.append(f"Model is permitted to use {tool_name}")
+            rule_trace.append("check_tool_permissions")
+        
+        # Schema validation passed
+        reasoning.append("No schema validation errors")
+        rule_trace.append("validate_schema")
+        
+        # Rate limits
+        reasoning.append("Session within rate limits")
+        rule_trace.append("check_rate_limits")
+        
+        # Risk level explanation
+        if risk_score < 0.2:
+            reasoning.append(f"Session score: low risk ({risk_score:.2f})")
+        elif risk_score < 0.5:
+            reasoning.append(f"Session score: medium risk ({risk_score:.2f})")
+        else:
+            reasoning.append(f"Session score: high risk ({risk_score:.2f})")
+        rule_trace.append("calculate_risk_score")
+        
+        # Add reasoning and rule trace to response
+        response["reasoning"] = reasoning
+        response["rule_trace"] = rule_trace
+        
         # 7. Check if we need to forward to another gateway
         forward_to = request.headers.get("X-Forward-To")
         if forward_to:
@@ -473,6 +506,8 @@ def tool_call():
                 "tool_result": tool_result,
                 "risk_score": risk_score,
                 "shadow_results": shadow_results,
+                "reasoning": reasoning,
+                "rule_trace": rule_trace,
                 "latency_ms": latency_ms
             })
             # Update session tracker
