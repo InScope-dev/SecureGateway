@@ -1,0 +1,111 @@
+Goal
+Verify that SecureGateway is fully aligned with Phase 4 (federation) and Phase 5 (adaptive enforcement).
+
+✅ 1. Verify Required Files Exist
+python
+Copy
+Edit
+import os
+
+required_files = [
+  "main.py", "mcp_routes.py", "session_tracker.py", "trusted_peers.yaml",
+  "tools/calendar.create_event.json",  # after unzip
+  "contextual_policy.yaml", "contextual_policy.preview.yaml",
+  "policies.yaml", "model_keys.yaml",
+  "audit_logger.py", "policy_engine.py"
+]
+
+for f in required_files:
+    if not os.path.exists(f):
+        print(f"❌ Missing: {f}")
+    else:
+        print(f"✅ Found: {f}")
+✅ 2. Test the /tools Catalog API
+Run this curl from the Replit Shell or Python:
+
+bash
+Copy
+Edit
+curl http://localhost:8000/tools
+✅ Should return:
+
+json
+Copy
+Edit
+["calendar.create_event", "search.query", "db.write_sensitive", ...]
+Then:
+
+bash
+Copy
+Edit
+curl http://localhost:8000/tools/calendar.create_event
+✅ Should return a full JSON Schema.
+
+✅ 3. Test /mcp/toolcall with risk_score
+Make a POST to /mcp/toolcall using:
+
+bash
+Copy
+Edit
+curl -X POST http://localhost:8000/mcp/toolcall \
+  -H "Content-Type: application/json" \
+  -H "X-Model-Key: your-model-key" \
+  -d '{
+    "model_id": "gpt-4o",
+    "session_id": "abc123",
+    "tool_name": "calendar.create_event",
+    "input": {
+      "title": "team sync",
+      "start_time": "2025-10-01T10:00:00Z"
+    }
+  }'
+✅ Response should include:
+
+json
+Copy
+Edit
+{
+  "allowed": true,
+  "trace_id": "...",
+  "risk_score": 0.0,
+  ...
+}
+✅ 4. Check the Dashboard UI
+Visit /dash:
+
+Confirm Tools tab exists
+
+Confirm tool schemas load
+
+Confirm risk_score column shows values
+
+Confirm filters and refresh work
+
+If risk or tool data doesn’t load → check browser console for JS errors.
+
+✅ 5. Verify Policy Files
+Check:
+
+policies.yaml is multi-line
+
+policies.yaml.new has been deleted
+
+contextual_policy.preview.yaml is present (for shadow mode)
+
+🧹 6. Check for Straggler Files
+In shell:
+
+bash
+Copy
+Edit
+ls *.new
+If you see:
+
+bash
+Copy
+Edit
+audit_logger.py.new
+rate_limiter.py.new
+schema_validator.py.new
+→ Safe to delete.
+
