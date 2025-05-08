@@ -92,12 +92,8 @@ def require_api_key(view_function):
 
 @admin_bp.route("/")
 def admin_dashboard():
-    """Admin dashboard with full configuration options and detailed metrics"""
-    api_key = request.args.get("api_key", "")
-    bypass_auth = request.args.get("bypass_auth", "false")
-    
-    # Skip authentication completely for troubleshooting
-    logger.info("Admin dashboard accessed")
+    """Admin dashboard focused on tools catalog"""
+    logger.info("Admin dashboard accessed with tools catalog")
     
     # Get recent logs
     logs = []
