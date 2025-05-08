@@ -286,8 +286,13 @@ def score_session(session_id):
     # Factor 3: High-risk tool categories
     category_counts = Counter()
     for call in tool_calls:
-        tool_name = call.get("tool", "")
+        # Debug logging to identify the issue
+        logger.debug(f"Processing call: {call}")
+        # Ensure tool is a string - might be getting a different type causing the error
+        tool_name = call.get("tool", "") if isinstance(call, dict) else str(call)
+        logger.debug(f"Tool name extracted: {tool_name}")
         categories = classify_tool(tool_name)
+        logger.debug(f"Categories for {tool_name}: {categories}")
         category_counts.update(categories)
     
     # Apply risk weights for categories
@@ -311,10 +316,25 @@ def score_session(session_id):
     
     # Factor 5: Rapid succession of calls (high velocity)
     if len(tool_calls) >= 2:
-        timestamps = [call.get("timestamp", 0) for call in tool_calls]
+        # Ensure timestamps are handled properly
+        timestamps = []
+        for call in tool_calls:
+            if isinstance(call, dict):
+                ts = call.get("timestamp", 0)
+            else:
+                # If call is not a dict, use current time as fallback
+                logger.warning(f"Call is not a dict: {call}")
+                ts = time.time()
+            timestamps.append(ts)
+            
+        logger.debug(f"Timestamps: {timestamps}")
         intervals = [timestamps[i] - timestamps[i-1] for i in range(1, len(timestamps))]
+        logger.debug(f"Time intervals: {intervals}")
+        
         # Check if there are multiple calls within a short time
         rapid_calls = sum(1 for interval in intervals if interval < 1.0)  # Less than 1 second
+        logger.debug(f"Rapid calls count: {rapid_calls}")
+        
         if rapid_calls > 3:
             score += 0.15
         elif rapid_calls > 1:
@@ -348,7 +368,12 @@ def get_session_stats(session_id):
     # Tool category analysis
     tool_categories = {}
     for call in tool_calls:
-        tool_name = call.get("tool", "")
+        if isinstance(call, dict):
+            tool_name = call.get("tool", "")
+        else:
+            logger.warning(f"Call is not a dict in get_session_stats: {call}")
+            tool_name = str(call)
+            
         categories = classify_tool(tool_name)
         for category in categories:
             if category not in tool_categories:
@@ -356,12 +381,29 @@ def get_session_stats(session_id):
             tool_categories[category] += 1
     
     # Most common tools
-    tool_counts = Counter(call.get("tool", "") for call in tool_calls)
+    tool_counts = Counter()
+    for call in tool_calls:
+        if isinstance(call, dict):
+            tool_name = call.get("tool", "")
+        else:
+            tool_name = str(call)
+        tool_counts[tool_name] += 1
     top_tools = tool_counts.most_common(5)
     
     # Session duration
     start_time = ctx.get("start_time", 0)
-    last_time = max([call.get("timestamp", start_time) for call in tool_calls]) if tool_calls else start_time
+    
+    # Safely get timestamps - handle non-dict calls
+    timestamps = []
+    for call in tool_calls:
+        if isinstance(call, dict):
+            ts = call.get("timestamp", start_time)
+        else:
+            # Default to current time for non-dict calls
+            ts = time.time()
+        timestamps.append(ts)
+    
+    last_time = max(timestamps) if timestamps else start_time
     duration_seconds = last_time - start_time
     
     return {

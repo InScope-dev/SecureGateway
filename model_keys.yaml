@@ -9,6 +9,13 @@ models:
       - "*"  # Allow all tools
     can_propose: true  # Can propose policy changes
     
+  gpt-4o:
+    key: "your-model-key"
+    description: "GPT-4o API"
+    allowed_tools:
+      - "*"  # Allow all tools
+    can_propose: true  # Can propose policy changes
+    
   claude-3-opus:
     key: "claude3-test-key"
     description: "Claude 3 Opus API"
