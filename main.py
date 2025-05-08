@@ -1088,13 +1088,23 @@ def dash():
     # Format logs for display
     formatted_logs = []
     for log in logs:
-        formatted_logs.append({
+        formatted_log = {
             "timestamp": log.get("timestamp", ""),
             "model_id": log.get("model_id", ""),
             "tool": log.get("tool", ""),
             "status": log.get("status", ""),
-            "reason": log.get("reason", "")
-        })
+            "reason": log.get("reason", ""),
+            "risk_score": log.get("risk_score", 0.0),
+            "latency_ms": log.get("latency_ms", 0)
+        }
+        
+        # Add explainable decision details if available
+        if "reasoning" in log:
+            formatted_log["reasoning"] = log["reasoning"]
+        if "rule_trace" in log:
+            formatted_log["rule_trace"] = log["rule_trace"]
+            
+        formatted_logs.append(formatted_log)
     
     # Main HTML content
     html_parts = []
@@ -1179,7 +1189,8 @@ def dash():
                                         <th>Model</th>
                                         <th>Tool</th>
                                         <th>Status</th>
-                                        <th>Reason</th>
+                                        <th>Reason & Explanations</th>
+                                        <th>Response Time</th>
                                     </tr>
                                 </thead>
                                 <tbody>"""
@@ -1192,11 +1203,16 @@ def dash():
                                         <td>{log['model_id']}</td>
                                         <td>{log['tool']}</td>
                                         <td>{log['status']}</td>
-                                        <td>{log['reason'] or ''}</td>
+                                        <td>
+                                            <div>{log['reason'] or ''}</div>
+                                            {f'<div class="mt-1 small text-muted"><strong>Reasoning:</strong> {"<br>".join(log["reasoning"]) if isinstance(log.get("reasoning"), list) else ""}</div>' if log.get('reasoning') else ''}
+                                            {f'<div class="mt-1 small text-muted"><strong>Rules:</strong> {", ".join(log["rule_trace"]) if isinstance(log.get("rule_trace"), list) else ""}</div>' if log.get('rule_trace') else ''}
+                                        </td>
+                                        <td>{f"{log['latency_ms']}ms" if log.get('latency_ms') else '-'}</td>
                                     </tr>"""
     else:
         logs_table += """
-                                    <tr><td colspan="5" class="text-center py-3">No audit logs found</td></tr>"""
+                                    <tr><td colspan="6" class="text-center py-3">No audit logs found</td></tr>"""
         
     logs_table += """
                                 </tbody>
@@ -1230,6 +1246,7 @@ def dash():
                                 <li>Reload policies: <code>/api/policy/reload</code> (POST)</li>
                                 <li>View history: <code>/api/policy/history</code></li>
                                 <li>Rollback: <code>/api/policy/rollback/{timestamp}</code> (POST)</li>
+                                <li>Propose changes: <code>/api/propose_policy</code> (POST)</li>
                             </ul>
                         </div>
                         
@@ -1341,6 +1358,58 @@ def dash():
         </div>
         
         <div class="row">
+            <div class="col-md-12 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Policy Proposal Management</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info mb-3">
+                            <p class="mb-0"><strong>Explainable Policy Negotiation</strong> allows trusted models to propose policy changes that can be automatically approved if they meet safety criteria or reviewed by administrators.</p>
+                        </div>
+                        
+                        <div class="form-group mb-3">
+                            <label for="policyProposalEditor" class="form-label">Create/Edit Policy Proposal (YAML):</label>
+                            <textarea id="policyProposalEditor" class="form-control font-monospace" rows="8" style="font-size: 0.875rem;" placeholder="# Enter YAML policy proposal here"></textarea>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="modelId" class="form-label">Model ID (for testing)</label>
+                                    <input type="text" id="modelId" class="form-control" placeholder="e.g., claude-3-opus">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="modelApiKey" class="form-label">API Key (for testing)</label>
+                                    <input type="text" id="modelApiKey" class="form-control" placeholder="Model API key">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex gap-2">
+                            <button id="submitProposal" class="btn btn-primary">Submit Proposal</button>
+                            <button id="checkProposalSafety" class="btn btn-secondary">Check Safety</button>
+                        </div>
+                        
+                        <div id="proposalStatus" class="mt-3"></div>
+                        
+                        <div class="mt-4">
+                            <h6 class="border-bottom pb-2 mb-3">Recent Policy Proposals</h6>
+                            <div id="policyProposals">
+                                <div class="text-center">
+                                    <p class="text-muted">No recent policy proposals found</p>
+                                    <p class="small text-muted">Policy proposals from trusted models will appear here</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
             <div class="col-12 mb-4">
                 <div class="card">
                     <div class="card-header">
@@ -1392,6 +1461,10 @@ def dash():
         // Shadow policy handlers
         document.getElementById('loadShadowPolicy').addEventListener('click', loadShadowPolicy);
         document.getElementById('saveShadowPolicy').addEventListener('click', saveShadowPolicy);
+        
+        // Policy proposal handlers
+        document.getElementById('submitProposal').addEventListener('click', submitPolicyProposal);
+        document.getElementById('checkProposalSafety').addEventListener('click', checkPolicyProposalSafety);
         
         // Initial shadow policy load
         loadShadowPolicy();
@@ -1671,6 +1744,136 @@ def dash():
             .catch(error => {
                 statusDiv.innerHTML = `<div class="alert alert-danger">Error saving shadow policy: ${error.message}</div>`;
             });
+    }
+    
+    // Function to submit a policy proposal
+    function submitPolicyProposal() {
+        const editor = document.getElementById('policyProposalEditor');
+        const policyYaml = editor.value.trim();
+        const modelId = document.getElementById('modelId').value.trim();
+        const modelApiKey = document.getElementById('modelApiKey').value.trim();
+        const statusDiv = document.getElementById('proposalStatus');
+        
+        if (!policyYaml) {
+            statusDiv.innerHTML = '<div class="alert alert-warning">Cannot submit empty policy proposal</div>';
+            return;
+        }
+        
+        if (!modelId) {
+            statusDiv.innerHTML = '<div class="alert alert-warning">Please enter a model ID for the proposal</div>';
+            return;
+        }
+        
+        statusDiv.innerHTML = '<div class="alert alert-info">Submitting policy proposal...</div>';
+        
+        // Headers with optional API key
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (modelApiKey) {
+            headers['X-API-Key'] = modelApiKey;
+        }
+        
+        fetch('/api/propose_policy', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                model_id: modelId,
+                policy_yaml: policyYaml
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                statusDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                return;
+            }
+            
+            if (data.auto_approved) {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <h5>Policy Proposal Auto-Approved!</h5>
+                        <p>${data.message || 'The proposal was automatically approved as it meets all safety criteria.'}</p>
+                        <p>The changes have been applied to the active policy.</p>
+                    </div>`;
+            } else {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-warning">
+                        <h5>Policy Proposal Needs Review</h5>
+                        <p>${data.message || 'The proposal requires administrator review before application.'}</p>
+                        <p>Reason: ${data.review_reason || 'Policy changes may impact security or contain sensitive modifications.'}</p>
+                    </div>`;
+            }
+        })
+        .catch(error => {
+            statusDiv.innerHTML = `<div class="alert alert-danger">Error submitting policy proposal: ${error.message}</div>`;
+        });
+    }
+    
+    // Function to check if a policy proposal is safe
+    function checkPolicyProposalSafety() {
+        const editor = document.getElementById('policyProposalEditor');
+        const policyYaml = editor.value.trim();
+        const statusDiv = document.getElementById('proposalStatus');
+        
+        if (!policyYaml) {
+            statusDiv.innerHTML = '<div class="alert alert-warning">Cannot check empty policy proposal</div>';
+            return;
+        }
+        
+        statusDiv.innerHTML = '<div class="alert alert-info">Checking policy safety...</div>';
+        
+        fetch('/api/check_policy_safety', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                policy_yaml: policyYaml
+            })
+        })
+        .then(response => {
+            // Check if endpoint exists
+            if (response.status === 404) {
+                throw new Error('Policy safety check endpoint not available');
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.error) {
+                statusDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                return;
+            }
+            
+            if (data.is_safe) {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <h5>Policy Changes Are Safe</h5>
+                        <p>The proposed policy meets all safety criteria for automatic approval.</p>
+                    </div>`;
+            } else {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-warning">
+                        <h5>Policy Changes Need Review</h5>
+                        <p>The proposed policy contains changes that require administrator review:</p>
+                        <ul>
+                            ${data.reasons.map(reason => `<li>${reason}</li>`).join('')}
+                        </ul>
+                    </div>`;
+            }
+        })
+        .catch(error => {
+            // Special case for missing endpoint
+            if (error.message === 'Policy safety check endpoint not available') {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-info">
+                        <p>Safety check endpoint not implemented yet.</p>
+                        <p>Submit your proposal to check if it will be auto-approved.</p>
+                    </div>`;
+            } else {
+                statusDiv.innerHTML = `<div class="alert alert-danger">Error checking policy safety: ${error.message}</div>`;
+            }
+        });
     }
     </script>
 </body>
