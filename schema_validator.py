@@ -1,6 +1,8 @@
 """
 MCP-Sec Schema Validator
 Validates JSON payloads against JSON Schema definitions
+
+Uses the tools_catalog module to access schemas and metadata
 """
 import os
 import json
@@ -8,10 +10,19 @@ import logging
 import jsonschema
 from typing import Dict, Any, Union, Optional
 
+# Import tools catalog module
+try:
+    from tools_catalog.catalog import load_schema as catalog_load_schema, clear_cache as catalog_clear_cache
+    USE_CATALOG = True
+except ImportError:
+    USE_CATALOG = False
+    # Handle fallback if tools catalog is not available
+    pass
+
 # Setup logging
 logger = logging.getLogger(__name__)
 
-# Global schema cache
+# Global schema cache for backward compatibility
 SCHEMAS = {}
 
 class SchemaValidationError(Exception):
@@ -29,6 +40,17 @@ def _load_schema(tool_name: str, schema_type: str = "input") -> Optional[Dict[st
     Returns:
         Schema dict or None if not found
     """
+    # Try to load from tools catalog first
+    if USE_CATALOG:
+        try:
+            schema = catalog_load_schema(tool_name, schema_type)
+            if schema:
+                return schema
+            # If not found, fall back to legacy method
+        except Exception as e:
+            logger.error(f"Error loading schema from catalog: {str(e)}")
+    
+    # Legacy schema loading from schemas directory
     # Generate cache key for this schema
     cache_key = f"{schema_type}.{tool_name}"
     
@@ -121,6 +143,15 @@ def reload_schemas() -> None:
     """Clear the schema cache to force reloading from disk"""
     global SCHEMAS
     SCHEMAS = {}
+    
+    # Clear catalog cache if using the tools catalog
+    if USE_CATALOG:
+        try:
+            catalog_clear_cache()
+            logger.info("Tools catalog cache cleared")
+        except Exception as e:
+            logger.error(f"Error clearing tools catalog cache: {str(e)}")
+    
     logger.info("Schema cache cleared")
 
 # Ensure schemas directory exists
