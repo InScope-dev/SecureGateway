@@ -3,15 +3,56 @@ MCP-Sec Session Tracker
 Maintains session state including prompts and tool usage history
 - Phase 5 enhancement: Risk scoring for sessions
 - Phase 5 enhancement: Security impact assessment for tools
+- Phase 6 enhancement: Integration with tools catalog for standardized risk assessment
 """
 import time
 import logging
 import re
 from collections import Counter
 from fnmatch import fnmatch
+from typing import Dict, Any, List, Optional
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+# Create fallback catalog module
+class FallbackToolCatalog:
+    def get_tool_metadata(self, tool_name: str) -> Optional[Dict[str, Any]]:
+        return None
+    
+    def get_tool_risk_level(self, tool_name: str) -> str:
+        return "unknown"
+    
+    def get_tool_categories(self, tool_name: str) -> List[str]:
+        return []
+
+# Setup tools catalog integration
+tool_catalog = FallbackToolCatalog()
+USE_CATALOG = False
+
+# Try to import tools catalog
+try:
+    # Assuming the metadata module would have similar interface
+    # as our fallback catalog, adjust import path as needed
+    from tools_catalog.catalog import get_tool_metadata, get_tool_risk_level, get_tool_categories
+    
+    # Create an adapter to use catalog functions
+    class CatalogAdapter:
+        def get_tool_metadata(self, tool_name: str) -> Optional[Dict[str, Any]]:
+            return get_tool_metadata(tool_name)
+        
+        def get_tool_risk_level(self, tool_name: str) -> str:
+            return get_tool_risk_level(tool_name)
+        
+        def get_tool_categories(self, tool_name: str) -> List[str]:
+            return get_tool_categories(tool_name)
+    
+    tool_catalog = CatalogAdapter()
+    USE_CATALOG = True
+    logger.info("Tools catalog integration enabled")
+except ImportError:
+    logger.warning("Tools catalog not available, using pattern-based classification")
+    pass
 
 # Global session state store
 SESSION_STATE = {}
@@ -168,18 +209,33 @@ def classify_tool(tool_name):
     """
     Classify a tool into risk categories
     
+    Tries to use the tools catalog first for accurate classification,
+    then falls back to pattern-based classification if catalog is not available
+    
     Args:
         tool_name: Name of the tool
         
     Returns:
         List of risk categories the tool belongs to
     """
+    # Try to use tools catalog first
+    if USE_CATALOG:
+        try:
+            # Get categories from catalog
+            catalog_categories = tool_catalog.get_tool_categories(tool_name)
+            if catalog_categories:
+                return catalog_categories
+        except Exception as e:
+            logger.error(f"Error getting tool categories from catalog: {str(e)}")
+    
+    # Fall back to pattern-based classification
     categories = []
     for category, patterns in TOOL_RISK_CATEGORIES.items():
         for pattern in patterns:
             if fnmatch(tool_name, pattern):
                 categories.append(category)
                 break
+    
     return categories
 
 def score_session(session_id):
