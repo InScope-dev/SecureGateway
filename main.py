@@ -52,6 +52,14 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login' # type: ignore
 
+# Define user loader
+@login_manager.user_loader
+def load_user(user_id):
+    if user_id == "admin":
+        from auth import AdminUser
+        return AdminUser()
+    return None
+
 # Validate policies on startup
 if not policy_validator.validate_policies_on_startup():
     logger.error("Policy validation failed. Server will continue but may encounter issues.")
