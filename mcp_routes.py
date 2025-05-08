@@ -646,8 +646,12 @@ def tool_call():
         return jsonify(response)
     
     except Exception as e:
+        import traceback
+        trace_str = traceback.format_exc()
         logger.error(f"Error processing tool call: {str(e)}")
-        # Log the error
+        logger.error(f"Traceback: {trace_str}")
+        
+        # Log the error with more detail
         try:
             error_data = {
                 "model_id": "unknown",
@@ -656,6 +660,7 @@ def tool_call():
                 "input": {},
                 "status": "error",
                 "reason": f"Internal error: {str(e)}",
+                "traceback": trace_str,
                 "latency_ms": int((time.time() - start_time) * 1000)
             }
             
@@ -667,18 +672,30 @@ def tool_call():
                     error_data["session_id"] = req_data.get("session_id", "unknown")
                     error_data["tool"] = req_data.get("tool_name", "unknown")
                     error_data["input"] = req_data.get("input", {})
-            except:
-                # If we can't get JSON data, continue with defaults
-                pass
+                    # Add debug info about session context
+                    try:
+                        session_id = req_data.get("session_id", "unknown")
+                        if session_id != "unknown":
+                            ctx = get_context(session_id)
+                            logger.debug(f"Session context for {session_id}: {ctx}")
+                            if "tool_calls" in ctx:
+                                logger.debug(f"Tool calls in session: {ctx['tool_calls']}")
+                    except Exception as ctx_err:
+                        logger.error(f"Error retrieving session context: {str(ctx_err)}")
+            except Exception as json_err:
+                # If we can't get JSON data, log the error and continue with defaults
+                logger.error(f"Error getting JSON data: {str(json_err)}")
                 
             log_event(error_data)
-        except:
-            # If logging fails too, just continue
-            pass
+        except Exception as log_err:
+            # If logging fails too, log this error
+            logger.error(f"Error logging error: {str(log_err)}")
+            
         return jsonify({
             "allowed": False,
             "status": "error",
-            "reason": f"Internal server error: {str(e)}"
+            "reason": f"Internal server error: {str(e)}",
+            "traceback": trace_str.split("\n")[-2] if trace_str else ""  # Just return last line of traceback
         }), 500
 
 @mcp_bp.route("/mcp/toolresult", methods=["POST"])
