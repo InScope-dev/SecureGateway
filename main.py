@@ -29,7 +29,7 @@ import session_tracker
 from session_tracker import get_context, score_session
 from rate_limiter import reset_limits
 
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Setup logger for this module

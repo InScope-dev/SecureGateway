@@ -104,14 +104,24 @@ def call_tool_api(tool_name, payload):
 
 def _mock_tool_response(tool_name, payload):
     """Mock implementations of tools for testing"""
+    # Add extra logging to track what's happening
+    logger.debug(f"Mock tool response for {tool_name}")
+    logger.debug(f"Payload: {payload}")
+    
+    # Make sure payload is a dictionary
+    if not isinstance(payload, dict):
+        logger.error(f"Payload is not a dictionary: {payload}")
+        payload = {} if payload is None else {"input": str(payload)}
+        
     # Calendar create event mock
     if tool_name == "calendar.create_event":
         title = payload.get("title", "Untitled")
         start_time = payload.get("start_time", "2025-01-01T00:00:00Z")
         return {
             "status": "ok",
-            "event_id": "ev-" + title.lower().replace(" ", "-"),
-            "start_time": start_time
+            "id": "ev-" + title.lower().replace(" ", "-"),
+            "status": "confirmed",
+            "calendar_link": f"https://calendar.example.com/events/ev-{title.lower().replace(' ', '-')}"
         }
     # DB write mock - always denied for sensitive DB
     elif tool_name == "db.write_sensitive":
