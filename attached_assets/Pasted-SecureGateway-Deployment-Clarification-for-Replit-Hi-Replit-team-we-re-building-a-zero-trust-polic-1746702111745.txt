@@ -1,0 +1,48 @@
+SecureGateway Deployment Clarification for Replit
+Hi Replit team — we’re building a zero-trust policy enforcement gateway for LLM agents (project name: SecureGateway). It enforces per-model tool access via JSON-RPC, tracks session behavior, and logs every ToolCall for compliance.
+
+We’re currently running the system in Replit and are preparing to finalize Phase 6, which includes explainable decisions, policy negotiation, and dashboard control.
+
+Can you help confirm or clarify the following infrastructure and runtime details?
+
+⚙️ Runtime & Persistence
+What are the current memory and CPU limits for a Repl like this?
+
+Can we reliably keep 500+ active sessions in SESSION_STATE (Python dict)?
+
+What’s the practical file size limit for something like audit.log?
+
+Do files like policies.yaml, audit.log, and trusted_peers.yaml persist across reboots?
+
+We rely on editing YAML configs through the dashboard and reloading them in memory.
+
+Are background jobs supported in Replit?
+
+Can we safely run things like an audit export or log anomaly scanner using threading or asyncio?
+
+🔐 Security & Secrets
+Are Replit Secrets secure for production API keys like ADMIN_KEY and MODEL_KEY?
+
+Are they ever exposed to frontend code unintentionally?
+
+Is there a clean way to implement simple admin login/auth flows?
+
+Our dashboard lives at /dash and currently uses X-Admin-Key for access.
+
+🌐 Networking & Federation
+Can a Repl make outbound HTTPS requests to peer gateways for federation?
+
+We send ToolCalls between gateways using requests.post() — are there rate or IP restrictions?
+
+Can other nodes reliably call into our Repl-hosted gateway?
+
+Are .repl.co URLs persistent, and can we treat them as federation endpoints?
+
+📦 Deployment, Migration & CI
+Can we set up a policy validation check before running main.py?
+
+For example, validate policies.yaml on boot or deploy.
+
+If we need to migrate this Repl to Render or Railway, are our current files portable?
+
+We’re using render.yaml, .replit, .env.example, and Dockerfile.
