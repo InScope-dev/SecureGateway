@@ -796,6 +796,15 @@ def api_session(session_id):
     context = session_tracker.get_context(session_id)
     if not context:
         return {"error": "Session not found"}, 404
+    
+    # Add risk score
+    risk_score = session_tracker.score_session(session_id)
+    context["risk_score"] = risk_score
+    
+    # Add session stats
+    stats = session_tracker.get_session_stats(session_id)
+    context["stats"] = stats
+    
     return context
 
 @app.route("/api/simulate", methods=["POST"])
