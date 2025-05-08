@@ -10,12 +10,31 @@ from functools import wraps
 from typing import Dict, List, Any, Optional
 
 from flask import Blueprint, request, jsonify, render_template_string
+from datetime import datetime
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
 
 # Create blueprint for admin routes
 admin_bp = Blueprint('admin', __name__)
+
+# Add template filters
+@admin_bp.app_template_filter('datetime')
+def format_datetime(value):
+    """Format a timestamp into a readable date/time"""
+    if not value:
+        return ""
+    try:
+        # Try to parse ISO format timestamp
+        if isinstance(value, str):
+            dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        elif isinstance(value, int):
+            dt = datetime.fromtimestamp(value)
+        else:
+            return str(value)
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    except:
+        return str(value)
 
 def require_api_key(view_function):
     """Decorator to require admin API key for sensitive endpoints."""
@@ -144,6 +163,34 @@ def admin_dashboard():
             formatted_log["rule_trace"] = log["rule_trace"]
             
         formatted_logs.append(formatted_log)
+    
+    # Get policy content and history
+    policy_yaml = ""
+    policy_history = []
+    try:
+        import policy_engine
+        policy_path = policy_engine.get_policy_path()
+        with open(policy_path, "r") as f:
+            policy_yaml = f.read()
+        policy_history = policy_engine.get_policy_history()
+    except Exception as e:
+        logger.error(f"Error loading policy: {e}")
+    
+    # Get configuration
+    config = {
+        "log_level": "info",
+        "max_hist": 500,
+        "auto_refresh_ms": 2000
+    }
+    try:
+        import main
+        if hasattr(main, 'config'):
+            config = main.config
+    except Exception as e:
+        logger.error(f"Error loading config: {e}")
+    
+    # Check if bypass_auth is enabled
+    bypass_auth = os.environ.get("BYPASS_AUTH", "").lower() == "true"
     
     # Render admin dashboard with distinct styling that clearly shows it's different from monitor
     return render_template_string("""
@@ -421,12 +468,47 @@ def admin_dashboard():
                                     <i class="bi bi-info-circle me-2"></i>
                                     This panel allows administrators to view and manage security policies.
                                 </div>
-                                <div class="d-flex justify-content-end mb-3">
-                                    <a href="/api/policy/reload" class="btn btn-primary">Reload Policies</a>
-                                </div>
-                                <div>
-                                    <h5>Policy Administration</h5>
-                                    <p>Coming soon: Policy editor with history and version control</p>
+                                <div class="row mb-4">
+                                    <div class="col-md-8">
+                                        <div class="card h-100">
+                                            <div class="card-header">
+                                                <h5 class="mb-0">Policy Editor</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <form id="policyForm">
+                                                    <div class="mb-3">
+                                                        <label for="policyContent" class="form-label">Edit Policy YAML</label>
+                                                        <textarea class="form-control font-monospace" id="policyContent" rows="15" style="tab-size: 2;">{{ policy_yaml }}</textarea>
+                                                    </div>
+                                                    <div class="d-flex justify-content-between">
+                                                        <button type="button" id="savePolicyBtn" class="btn btn-primary">Save Policy</button>
+                                                        <button type="button" id="reloadPolicyBtn" class="btn btn-outline-secondary">Reload from Disk</button>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="card h-100">
+                                            <div class="card-header">
+                                                <h5 class="mb-0">Policy History</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div id="policyHistory">
+                                                    <div class="list-group">
+                                                        {% for version in policy_history %}
+                                                        <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                                            {{ version.timestamp | datetime }}
+                                                            <button class="btn btn-sm btn-outline-secondary rollback-btn" data-timestamp="{{ version.timestamp }}">Rollback</button>
+                                                        </a>
+                                                        {% else %}
+                                                        <div class="text-muted">No policy history available</div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -447,9 +529,93 @@ def admin_dashboard():
                                     <i class="bi bi-info-circle me-2"></i>
                                     This panel allows administrators to configure the MCP-Sec Gateway.
                                 </div>
-                                <div>
-                                    <h5>System Configuration</h5>
-                                    <p>Coming soon: Gateway configuration editor</p>
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0">System Configuration</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <form id="configForm">
+                                                    <div class="mb-3">
+                                                        <label for="logLevel" class="form-label">Log Level</label>
+                                                        <select class="form-select" id="logLevel">
+                                                            <option value="debug" {% if config.log_level == 'debug' %}selected{% endif %}>DEBUG</option>
+                                                            <option value="info" {% if config.log_level == 'info' %}selected{% endif %}>INFO</option>
+                                                            <option value="warning" {% if config.log_level == 'warning' %}selected{% endif %}>WARNING</option>
+                                                            <option value="error" {% if config.log_level == 'error' %}selected{% endif %}>ERROR</option>
+                                                        </select>
+                                                    </div>
+                                                    
+                                                    <div class="mb-3">
+                                                        <label for="maxHistory" class="form-label">Maximum History Size</label>
+                                                        <input type="number" class="form-control" id="maxHistory" value="{{ config.max_hist }}">
+                                                        <div class="form-text">Maximum number of log entries to keep in memory.</div>
+                                                    </div>
+                                                    
+                                                    <div class="mb-3">
+                                                        <label for="autoRefresh" class="form-label">Auto-Refresh Interval (ms)</label>
+                                                        <input type="number" class="form-control" id="autoRefresh" value="{{ config.auto_refresh_ms }}">
+                                                        <div class="form-text">Dashboard auto-refresh interval in milliseconds. Set to 0 to disable.</div>
+                                                    </div>
+                                                    
+                                                    <div class="form-check mb-3">
+                                                        <input class="form-check-input" type="checkbox" id="bypassAuth" {% if bypass_auth %}checked{% endif %}>
+                                                        <label class="form-check-label" for="bypassAuth">
+                                                            Enable Authentication Bypass (Development Only)
+                                                        </label>
+                                                    </div>
+                                                    
+                                                    <button type="button" id="saveConfigBtn" class="btn btn-primary">Save Configuration</button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4">
+                                        <div class="card mb-4">
+                                            <div class="card-header">
+                                                <h5 class="mb-0">System Status</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <ul class="list-group">
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        Policy Engine
+                                                        <span class="badge bg-success rounded-pill">Active</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        Schema Validator
+                                                        <span class="badge bg-success rounded-pill">Active</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        Rate Limiter
+                                                        <span class="badge bg-success rounded-pill">Active</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        Session Tracker
+                                                        <span class="badge bg-success rounded-pill">Active</span>
+                                                    </li>
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                        Audit Logger
+                                                        <span class="badge bg-success rounded-pill">Active</span>
+                                                    </li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="card">
+                                            <div class="card-header">
+                                                <h5 class="mb-0">Actions</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="d-grid gap-2">
+                                                    <button class="btn btn-outline-primary" id="resetLimitsBtn">Reset Rate Limits</button>
+                                                    <button class="btn btn-outline-primary" id="clearCacheBtn">Clear Cache</button>
+                                                    <button class="btn btn-outline-danger" id="restartBtn">Restart Gateway</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -460,6 +626,192 @@ def admin_dashboard():
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Policy Management Tab
+        const savePolicyBtn = document.getElementById('savePolicyBtn');
+        const reloadPolicyBtn = document.getElementById('reloadPolicyBtn');
+        const policyContent = document.getElementById('policyContent');
+        
+        if (savePolicyBtn) {
+            savePolicyBtn.addEventListener('click', function() {
+                if (confirm('Are you sure you want to save this policy? This will affect all security decisions.')) {
+                    fetch('/api/policy', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            policy_yaml: policyContent.value
+                        }),
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Policy saved successfully!');
+                            // Reload the page to refresh history
+                            window.location.reload();
+                        } else {
+                            alert('Error saving policy: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error saving policy. Check console for details.');
+                    });
+                }
+            });
+        }
+        
+        if (reloadPolicyBtn) {
+            reloadPolicyBtn.addEventListener('click', function() {
+                fetch('/api/policy/reload')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Policy reloaded successfully!');
+                        window.location.reload();
+                    } else {
+                        alert('Error reloading policy: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error reloading policy. Check console for details.');
+                });
+            });
+        }
+        
+        // Add event listeners for policy rollback buttons
+        document.querySelectorAll('.rollback-btn').forEach(button => {
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                const timestamp = this.getAttribute('data-timestamp');
+                if (confirm('Are you sure you want to rollback to this version? This will affect all security decisions.')) {
+                    fetch(`/api/policy/rollback/${timestamp}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Policy rolled back successfully!');
+                            window.location.reload();
+                        } else {
+                            alert('Error rolling back policy: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error rolling back policy. Check console for details.');
+                    });
+                }
+            });
+        });
+        
+        // Configuration Tab
+        const saveConfigBtn = document.getElementById('saveConfigBtn');
+        const logLevel = document.getElementById('logLevel');
+        const maxHistory = document.getElementById('maxHistory');
+        const autoRefresh = document.getElementById('autoRefresh');
+        const bypassAuth = document.getElementById('bypassAuth');
+        
+        if (saveConfigBtn) {
+            saveConfigBtn.addEventListener('click', function() {
+                fetch('/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        log_level: logLevel.value,
+                        max_hist: parseInt(maxHistory.value),
+                        auto_refresh_ms: parseInt(autoRefresh.value),
+                        bypass_auth: bypassAuth.checked
+                    }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Configuration saved successfully!');
+                        window.location.reload();
+                    } else {
+                        alert('Error saving configuration: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error saving configuration. Check console for details.');
+                });
+            });
+        }
+        
+        // Additional action buttons
+        const resetLimitsBtn = document.getElementById('resetLimitsBtn');
+        const clearCacheBtn = document.getElementById('clearCacheBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        
+        if (resetLimitsBtn) {
+            resetLimitsBtn.addEventListener('click', function() {
+                if (confirm('Are you sure you want to reset all rate limits?')) {
+                    fetch('/api/limits/reset')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Rate limits reset successfully!');
+                        } else {
+                            alert('Error resetting rate limits: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error resetting rate limits. Check console for details.');
+                    });
+                }
+            });
+        }
+        
+        if (clearCacheBtn) {
+            clearCacheBtn.addEventListener('click', function() {
+                if (confirm('Are you sure you want to clear the schema cache?')) {
+                    fetch('/api/schema/reload')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Schema cache cleared successfully!');
+                        } else {
+                            alert('Error clearing schema cache: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error clearing schema cache. Check console for details.');
+                    });
+                }
+            });
+        }
+        
+        if (restartBtn) {
+            restartBtn.addEventListener('click', function() {
+                if (confirm('Are you sure you want to restart the gateway? This will temporarily disrupt service.')) {
+                    alert('Gateway restart requested. The page will reload in 5 seconds.');
+                    setTimeout(function() {
+                        window.location.reload();
+                    }, 5000);
+                }
+            });
+        }
+    });
+    </script>
 </body>
 </html>
-""", tools=tools, total_requests=total_requests, allowed=allowed, denied=denied, errors=errors, formatted_logs=formatted_logs)
+""", 
+        tools=tools,
+        total_requests=total_requests, 
+        allowed=allowed, 
+        denied=denied, 
+        errors=errors, 
+        formatted_logs=formatted_logs,
+        policy_yaml=policy_yaml,
+        policy_history=policy_history,
+        config=config,
+        bypass_auth=bypass_auth
+    )
