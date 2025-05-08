@@ -185,7 +185,8 @@ def root():
                 <h1 class="display-5 fw-bold">Zero Trust Security Layer</h1>
                 <p class="col-md-8 fs-4">Validate, control, and monitor AI tool interactions with comprehensive security policies.</p>
                 <div class="d-flex gap-2 mt-4">
-                    <a href="/dash" class="btn btn-primary btn-lg px-4">Dashboard</a>
+                    <a href="/monitor" class="btn btn-primary btn-lg px-4">Monitoring</a>
+                    <a href="/admin" class="btn btn-danger btn-lg px-4">Admin Panel</a>
                     <a href="/test" class="btn btn-outline-secondary btn-lg px-4">Test Interface</a>
                 </div>
             </div>
@@ -1064,11 +1065,9 @@ def api_projects():
     except Exception as e:
         return {"error": str(e)}, 500
 
-@app.route("/dash")
-def dash():
-    """Simple working dashboard with minimal JavaScript"""
-    api_key = request.args.get("api_key", "")
-    
+@app.route("/monitor")
+def monitor():
+    """Public monitoring dashboard with basic metrics and recent logs"""
     # Get recent logs
     logs = []
     try:
@@ -1078,6 +1077,12 @@ def dash():
             logs.reverse()  # Show newest first
     except:
         pass
+        
+@app.route("/admin")
+@require_api_key
+def admin():
+    """Admin dashboard with full configuration options and detailed metrics"""
+    api_key = request.args.get("api_key", "")
     
     # Get metrics
     total_requests = len(logs)
