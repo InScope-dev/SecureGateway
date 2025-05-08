@@ -24,6 +24,9 @@ from rate_limiter import reset_limits
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+# Setup logger for this module
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "mcp-sec-insecure-key")
 
@@ -691,6 +694,15 @@ def api_save_config():
             # Validate YAML format
             yaml.safe_load(data["policy_yaml"])
             
+            # Create backup before overwriting
+            from shutil import copyfile
+            import time
+            backup_name = f"policies.{int(time.time())}.yaml"
+            try:
+                copyfile("policies.yaml", backup_name)
+            except Exception as e:
+                logging.error(f"Failed to create policy backup: {str(e)}")
+            
             with open("policies.yaml", "w") as f:
                 f.write(data["policy_yaml"])
         except yaml.YAMLError as e:
@@ -700,6 +712,15 @@ def api_save_config():
         try:
             # Validate YAML format
             yaml.safe_load(data["contextual_policy_yaml"])
+            
+            # Create backup before overwriting
+            from shutil import copyfile
+            import time
+            backup_name = f"contextual_policy.{int(time.time())}.yaml"
+            try:
+                copyfile("contextual_policy.yaml", backup_name)
+            except Exception as e:
+                logging.error(f"Failed to create contextual policy backup: {str(e)}")
             
             with open("contextual_policy.yaml", "w") as f:
                 f.write(data["contextual_policy_yaml"])
@@ -712,6 +733,16 @@ def api_save_config():
             os.environ[k] = str(data[k.lower()])
             
     return {"status": "saved"}
+
+@app.route("/api/session/<session_id>", methods=["GET"])
+@require_api_key
+def api_session(session_id):
+    """Get details of a specific session"""
+    import session_tracker
+    context = session_tracker.get_context(session_id)
+    if not context:
+        return {"error": "Session not found"}, 404
+    return context
 
 @app.route("/dash")
 def dash():

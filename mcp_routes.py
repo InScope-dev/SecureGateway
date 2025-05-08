@@ -151,7 +151,7 @@ def tool_call():
         }
         
         # Validate model API key
-        model_key = request.headers.get("X-Model-Key")
+        model_key = request.headers.get("X-Model-Key", "")  # Default to empty string if not present
         is_valid, reason = validate_model_key(model_id, model_key, tool_name)
         if not is_valid:
             response["reason"] = reason
