@@ -11,8 +11,7 @@ from typing import Dict, List, Any, Optional
 
 from flask import Blueprint, request, jsonify, render_template_string
 from datetime import datetime
-
-from auth import login_required
+from flask_login import login_required
 
 # Setup logger for this module
 logger = logging.getLogger(__name__)
@@ -192,7 +191,8 @@ def admin_dashboard():
                         <h2 class="mb-0">MCP-Sec Gateway Admin Dashboard</h2>
                         <div>
                             <a href="/" class="btn btn-sm btn-light me-2">Home</a>
-                            <a href="/monitor" class="btn btn-sm btn-outline-light">Monitoring</a>
+                            <a href="/monitor" class="btn btn-sm btn-outline-light me-2">Monitoring</a>
+                            <a href="/logout" class="btn btn-sm btn-warning">Logout</a>
                         </div>
                     </div>
                 </div>
