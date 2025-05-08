@@ -491,9 +491,15 @@ def simulate_shadow_policy(model_id: str, tool_name: str, session_id: str, conte
     # Load shadow policies from preview file
     try:
         with open("contextual_policy.preview.yaml", "r") as f:
-            shadow_policies = yaml.safe_load(f)
-            if shadow_policies is None:
+            yaml_content = yaml.safe_load(f)
+            if yaml_content is None:
                 shadow_policies = []
+            else:
+                # The file has a 'shadow_rules' key containing the array of rules
+                shadow_policies = yaml_content.get("shadow_rules", [])
+                if not isinstance(shadow_policies, list):
+                    logger.error(f"shadow_rules in contextual_policy.preview.yaml is not a list, got: {type(shadow_policies)}")
+                    shadow_policies = []
     except Exception as e:
         logger.error(f"Error loading shadow policies: {str(e)}")
         return {"simulated": False, "error": str(e)}
@@ -502,7 +508,15 @@ def simulate_shadow_policy(model_id: str, tool_name: str, session_id: str, conte
     calls = context.get("tool_calls", [])
     results = {"simulated": True, "would_allow": True, "triggered_rules": []}
     
+    # Debug logging
+    logger.debug(f"Shadow policies loaded: {shadow_policies}")
+    
     for rule in shadow_policies:
+        # Skip if rule is not a dictionary
+        if not isinstance(rule, dict):
+            logger.warning(f"Shadow rule is not a dictionary: {rule}")
+            continue
+            
         # Skip rules that don't apply to this tool
         when_tool = rule.get("when_tool", "")
         if when_tool and not _match_pattern(tool_name, when_tool):
