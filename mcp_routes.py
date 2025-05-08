@@ -7,12 +7,17 @@ import os
 import logging
 import requests
 from flask import Blueprint, request, jsonify
+from fnmatch import fnmatch
 
+import policy_engine
 from policy_engine import check_policy, check_policy_contextual, validate_model_key
 from rate_limiter import check_limit, RateLimitError
 from schema_validator import validate_input, validate_output, SchemaValidationError
 from audit_logger import log_event
 from session_tracker import init_session, update_tool_call, get_context
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 # Configure tool server URL - default to internal mock endpoints
 TOOL_SERVER_URL = os.getenv("TOOL_SERVER_URL", None)
@@ -60,8 +65,7 @@ def _mock_tool_response(tool_name, payload):
             "input": payload
         }
 
-# Setup logging
-logger = logging.getLogger(__name__)
+# Use the logger already defined above
 
 # Create the blueprint
 mcp_bp = Blueprint("mcp", __name__)
@@ -90,6 +94,27 @@ def prompt():
         model_id = data["model_id"]
         session_id = data["session_id"]
         prompt_text = data["prompt"]
+        
+        # Validate model API key - less strict for prompt endpoint
+        # but still verify the model exists if API key validation is enabled
+        if not os.environ.get("BYPASS_MODEL_KEY_CHECK"):
+            model_key = request.headers.get("X-Model-Key")
+            
+            # Only verify model exists and key if provided
+            if model_key:
+                is_valid, reason = validate_model_key(model_id, model_key, "prompt")
+                if not is_valid:
+                    logger.warning(f"Invalid model API key for prompt: {reason}")
+                    return jsonify({
+                        "status": "error",
+                        "reason": f"Invalid model API key: {reason}"
+                    }), 401
+            elif model_id not in policy_engine.MODEL_KEYS.get("models", {}):
+                logger.warning(f"Unknown model attempted access: {model_id}")
+                return jsonify({
+                    "status": "error",
+                    "reason": f"Unknown model: {model_id}"
+                }), 401
         
         # Initialize session
         init_session(session_id, model_id, prompt_text)

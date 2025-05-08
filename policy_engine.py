@@ -279,16 +279,37 @@ def validate_model_key(model_id: str, provided_key: str, tool_name: str) -> Tupl
     Returns:
         Tuple of (is_valid, reason)
     """
+    # If environment variable is set to bypass key checks (for development/testing)
+    if os.environ.get("BYPASS_MODEL_KEY_CHECK"):
+        logger.warning(f"Bypassing model key validation for {model_id} (BYPASS_MODEL_KEY_CHECK is set)")
+        return True, ""
+        
+    # If provided_key is None, handle it properly
+    if provided_key is None:
+        logger.warning(f"Missing API key for model {model_id}")
+        return False, f"API key is required for model {model_id}"
+    
     try:
         # Check if model ID exists
         if model_id not in MODEL_KEYS.get("models", {}):
+            logger.warning(f"Unknown model attempted access: {model_id}")
             return False, f"Unknown model: {model_id}"
         
         # Get model config
         model_config = MODEL_KEYS["models"][model_id]
         
-        # Check if API key matches
-        if not provided_key or model_config.get("key") != provided_key:
+        # Get expected key from the configuration
+        expected_key = model_config.get("key")
+        
+        # Check if the expected key is properly configured
+        if not expected_key:
+            logger.error(f"Model {model_id} has no API key configured")
+            return False, f"Configuration error: No API key configured for {model_id}"
+        
+        # Check if API key matches (using constant-time comparison to prevent timing attacks)
+        import hmac
+        if not hmac.compare_digest(str(expected_key), str(provided_key)):
+            logger.warning(f"Invalid API key provided for model {model_id}")
             return False, "Invalid model API key"
         
         # Check if API key has expired
@@ -296,22 +317,29 @@ def validate_model_key(model_id: str, provided_key: str, tool_name: str) -> Tupl
             try:
                 expiry_time = datetime.fromisoformat(model_config["expires"]).timestamp()
                 if time.time() > expiry_time:
+                    logger.warning(f"Expired API key used for model {model_id}")
                     return False, f"API key expired on {model_config['expires']}"
             except (ValueError, TypeError) as e:
-                logger.error(f"Error parsing expiry date: {e}")
+                logger.error(f"Error parsing expiry date for model {model_id}: {e}")
                 return False, "Invalid expiry date format in configuration"
         
         # Check if tool is allowed for this model
         tool_patterns = model_config.get("tools", [])
+        if not tool_patterns:
+            logger.error(f"No tools configured for model {model_id}")
+            return False, f"No tools configured for model {model_id}"
+            
         if not any(fnmatch(tool_name, pattern) for pattern in tool_patterns):
+            logger.warning(f"Tool '{tool_name}' access denied for model {model_id}")
             return False, f"Tool '{tool_name}' not in allowed scope for this model"
         
         # All checks passed
+        logger.debug(f"API key validated successfully for {model_id} using tool {tool_name}")
         return True, ""
         
     except Exception as e:
         logger.error(f"Error validating model key: {str(e)}")
-        return False, f"Key validation error: {str(e)}"
+        return False, "Key validation error: Internal server error"
 
 def check_policy(model_id: str, tool_name: str, session_id: str) -> Tuple[bool, Optional[str]]:
     """
