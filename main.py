@@ -605,6 +605,97 @@ def api_policy_reload():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/propose_policy", methods=["POST"])
+@require_api_key
+def api_propose_policy():
+    """
+    Allow models or admins to propose policy changes
+    
+    This endpoint:
+    1. Validates the YAML format
+    2. Checks if the requesting model is allowed to propose policies
+    3. Logs the proposal
+    4. Auto-approves safe proposals or marks them for review
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        # Validate required fields
+        if "yaml" not in data:
+            return jsonify({"error": "Missing required field: yaml"}), 400
+        
+        yaml_str = data["yaml"]
+        model_id = data.get("model_id")
+        justification = data.get("justification", "")
+        
+        # Parse the YAML to validate format
+        try:
+            new_policy = yaml.safe_load(yaml_str)
+        except yaml.YAMLError as e:
+            return jsonify({"status": "rejected", "reason": f"Invalid YAML: {str(e)}"}), 400
+        
+        # Check if model is allowed to propose policies
+        if model_id and not policy_engine.is_model_permitted_to_propose(model_id):
+            return jsonify({
+                "status": "rejected", 
+                "reason": "The specified model is not authorized to propose policy changes"
+            }), 403
+        
+        # Sign the policy proposal
+        signature = policy_engine.sign_policy(yaml_str)
+        
+        # Log the proposal
+        audit_logger.log_event({
+            "event_type": "policy_proposal",
+            "model_id": model_id or "admin",
+            "yaml": yaml_str,
+            "justification": justification,
+            "signature": signature,
+            "status": "pending"
+        })
+        
+        # Check if policy is safe for auto-approval
+        is_safe = policy_engine.is_safe_policy(new_policy)
+        
+        if is_safe:
+            # Auto-approve and merge the policy
+            success = policy_engine.merge_policy_yaml("policies.yaml", new_policy)
+            if success:
+                # Reload policies
+                policy_engine.reload_policies()
+                
+                # Log the approval
+                audit_logger.log_event({
+                    "event_type": "policy_approval",
+                    "model_id": model_id or "admin",
+                    "yaml": yaml_str,
+                    "justification": justification,
+                    "signature": signature,
+                    "status": "auto_approved"
+                })
+                
+                return jsonify({
+                    "status": "approved",
+                    "reason": "Policy change was automatically approved as it only contains safe changes"
+                })
+            else:
+                return jsonify({
+                    "status": "error",
+                    "reason": "Failed to merge policy changes"
+                }), 500
+        else:
+            # Mark for manual review
+            return jsonify({
+                "status": "pending",
+                "reason": "Policy change requires manual review",
+                "review_required": True
+            })
+    except Exception as e:
+        logger.error(f"Error processing policy proposal: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/schema/reload", methods=["POST"])
 @require_api_key
 def api_schema_reload():

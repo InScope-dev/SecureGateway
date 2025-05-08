@@ -700,13 +700,13 @@ def is_safe_policy(policy: Dict[str, Any]) -> bool:
     
     return all_safe
 
-def sign_policy(yaml_str: str, key: str = None) -> str:
+def sign_policy(yaml_str: str, key: Optional[str] = None) -> str:
     """
     Sign a policy YAML string
     
     Args:
         yaml_str: The YAML string to sign
-        key: The key to use for signing. Defaults to ADMIN_KEY
+        key: The key to use for signing. Defaults to ADMIN_KEY env variable
         
     Returns:
         The signature as a hexadecimal string
@@ -714,10 +714,9 @@ def sign_policy(yaml_str: str, key: str = None) -> str:
     import hmac
     import hashlib
     
-    if key is None:
-        key = os.environ.get("ADMIN_KEY", "supersecret")
+    signing_key = key if key is not None else os.environ.get("ADMIN_KEY", "supersecret")
         
-    return hmac.new(key.encode(), yaml_str.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(signing_key.encode(), yaml_str.encode(), hashlib.sha256).hexdigest()
     
 def merge_policy_yaml(target_path: str, new_policy: Dict[str, Any]) -> bool:
     """
