@@ -298,7 +298,27 @@ def tool_call():
         allowed, reason = check_policy(model_id, tool_name, session_id)
         if not allowed:
             response["reason"] = reason
-            # Log the denied event
+            
+            # Add explanations and reasoning for denial
+            reasoning = []
+            rule_trace = []
+            
+            # Basic policy denial details
+            reason_text = reason or ""  # Handle None case
+            if "not allowed" in reason_text:
+                reasoning.append(f"Model {model_id} is not permitted to use {tool_name}")
+                rule_trace.append("check_tool_whitelist")
+            elif "inactive hours" in reason_text:
+                reasoning.append(f"Tool {tool_name} is only available during specific hours")
+                rule_trace.append("check_active_hours")
+            else:
+                reasoning.append(reason_text)
+                rule_trace.append("basic_policy_check")
+                
+            response["reasoning"] = reasoning
+            response["rule_trace"] = rule_trace
+            
+            # Log the denied event with reasoning
             log_event({
                 "model_id": model_id,
                 "session_id": session_id,
@@ -306,6 +326,8 @@ def tool_call():
                 "input": input_data,
                 "status": "denied",
                 "reason": reason,
+                "reasoning": reasoning,
+                "rule_trace": rule_trace,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
             # Update session tracker
@@ -317,7 +339,39 @@ def tool_call():
         if not contextual_decision.get("allowed", True):
             reason = contextual_decision.get("reason", "Denied by contextual policy")
             response["reason"] = reason
-            # Log the denied event
+            
+            # Add explanations and reasoning for contextual denial
+            reasoning = []
+            rule_trace = []
+            
+            # Get detailed reasoning if available
+            detailed_reasoning = contextual_decision.get("reasoning", [])
+            detailed_rule_trace = contextual_decision.get("rule_trace", [])
+            
+            # If detailed reasoning is provided, use it
+            if detailed_reasoning and detailed_rule_trace:
+                reasoning = detailed_reasoning
+                rule_trace = detailed_rule_trace
+            else:
+                # Otherwise generate generic explanations based on reason text
+                reason_text = reason or ""  # Handle None case
+                if "suspicious pattern" in reason_text:
+                    reasoning.append("Detected suspicious sequence of tool usage")
+                    rule_trace.append("check_suspicious_patterns")
+                elif "risk score" in reason_text:
+                    reasoning.append(f"Session risk score exceeded threshold")
+                    rule_trace.append("check_session_risk")
+                elif "multiple failed attempts" in reason_text:
+                    reasoning.append("Too many denied requests in this session")
+                    rule_trace.append("check_denial_history")
+                else:
+                    reasoning.append(reason_text)
+                    rule_trace.append("contextual_policy_check")
+            
+            response["reasoning"] = reasoning
+            response["rule_trace"] = rule_trace
+            
+            # Log the denied event with reasoning
             log_event({
                 "model_id": model_id,
                 "session_id": session_id,
@@ -325,6 +379,8 @@ def tool_call():
                 "input": input_data,
                 "status": "denied",
                 "reason": reason,
+                "reasoning": reasoning,
+                "rule_trace": rule_trace,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
             # Update session tracker
@@ -337,7 +393,20 @@ def tool_call():
         except RateLimitError as e:
             reason = str(e)
             response["reason"] = reason
-            # Log the rate-limited event
+            
+            # Add explanations for rate limit denial
+            reasoning = []
+            rule_trace = []
+            
+            # Detailed reasoning about rate limits
+            reasoning.append(f"Rate limit exceeded for session")
+            reasoning.append(f"Error: {reason}")
+            rule_trace.append("check_rate_limits")
+            
+            response["reasoning"] = reasoning
+            response["rule_trace"] = rule_trace
+            
+            # Log the rate-limited event with reasoning
             log_event({
                 "model_id": model_id,
                 "session_id": session_id,
@@ -345,6 +414,8 @@ def tool_call():
                 "input": input_data,
                 "status": "denied",
                 "reason": reason,
+                "reasoning": reasoning,
+                "rule_trace": rule_trace,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
             # Update session tracker
@@ -357,7 +428,33 @@ def tool_call():
         except SchemaValidationError as e:
             reason = f"Schema validation error: {str(e)}"
             response["reason"] = reason
-            # Log the validation error
+            
+            # Add explanations for schema validation errors
+            reasoning = []
+            rule_trace = []
+            
+            # Detailed reasoning about schema validation
+            error_msg = str(e)
+            reasoning.append(f"Input validation failed for tool '{tool_name}'")
+            
+            # Provide more specific explanations based on common errors
+            if "required property" in error_msg:
+                reasoning.append("Missing required field in request")
+            elif "is not of type" in error_msg:
+                reasoning.append("Data type mismatch in request field")
+            elif "does not match" in error_msg:
+                reasoning.append("Input value does not match required pattern")
+            elif "is greater than the maximum" in error_msg or "is less than the minimum" in error_msg:
+                reasoning.append("Input value outside allowed range")
+            
+            # Add the detailed error message
+            reasoning.append(f"Error: {error_msg}")
+            rule_trace.append("validate_schema")
+            
+            response["reasoning"] = reasoning
+            response["rule_trace"] = rule_trace
+            
+            # Log the validation error with reasoning
             log_event({
                 "model_id": model_id,
                 "session_id": session_id,
@@ -365,6 +462,8 @@ def tool_call():
                 "input": input_data,
                 "status": "denied",
                 "reason": reason,
+                "reasoning": reasoning,
+                "rule_trace": rule_trace,
                 "latency_ms": int((time.time() - start_time) * 1000)
             })
             # Update session tracker
