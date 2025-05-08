@@ -2,12 +2,15 @@
 MCP-Sec Policy Engine
 Loads and enforces security policies from policies.yaml file
 and contextual policies from contextual_policy.yaml
+Also validates model API keys from model_keys.yaml
 """
 import os
 import re
 import yaml
+import time
 import logging
 from datetime import datetime
+from fnmatch import fnmatch
 from typing import Dict, List, Tuple, Any, Optional
 
 # Setup logging
@@ -85,18 +88,102 @@ def load_contextual_policies(path="contextual_policy.yaml") -> List[Dict[str, An
         logger.error(f"Unexpected error loading contextual policies: {str(e)}")
         return []
 
+# Global model keys store
+MODEL_KEYS = {}
+
+def load_model_keys(path="model_keys.yaml") -> Dict[str, Any]:
+    """
+    Load model API keys and permissions from YAML file
+    
+    Args:
+        path: Path to model keys file
+        
+    Returns:
+        Dict containing model keys and permissions
+    """
+    try:
+        with open(path, 'r') as f:
+            keys_data = yaml.safe_load(f)
+        
+        if not isinstance(keys_data, dict) or "models" not in keys_data:
+            logger.error("Invalid model keys structure: missing 'models' key")
+            return {"models": {}}
+        
+        logger.info(f"Successfully loaded keys for {len(keys_data['models'])} models")
+        return keys_data
+    
+    except FileNotFoundError:
+        logger.error(f"Model keys file not found: {path}")
+        return {"models": {}}
+    
+    except yaml.YAMLError as e:
+        logger.error(f"Error parsing YAML model keys file: {str(e)}")
+        return {"models": {}}
+    
+    except Exception as e:
+        logger.error(f"Unexpected error loading model keys: {str(e)}")
+        return {"models": {}}
+
 # Load policies at module import
 POLICIES = load_policy()
 CONTEXTUAL_POLICIES = load_contextual_policies()
+MODEL_KEYS = load_model_keys()
 
 def reload_policies() -> None:
     """
     Reload basic and contextual policies from YAML files
     """
-    global POLICIES, CONTEXTUAL_POLICIES
+    global POLICIES, CONTEXTUAL_POLICIES, MODEL_KEYS
     POLICIES = load_policy()
     CONTEXTUAL_POLICIES = load_contextual_policies()
-    logger.info("All policies reloaded")
+    MODEL_KEYS = load_model_keys()
+    logger.info("All policies and model keys reloaded")
+
+def validate_model_key(model_id: str, provided_key: str, tool_name: str) -> Tuple[bool, str]:
+    """
+    Validate a model's API key and check if it has permission to use the specified tool
+    
+    Args:
+        model_id: The ID of the model
+        provided_key: The API key provided in the request
+        tool_name: The name of the tool being called
+    
+    Returns:
+        Tuple of (is_valid, reason)
+    """
+    try:
+        # Check if model ID exists
+        if model_id not in MODEL_KEYS.get("models", {}):
+            return False, f"Unknown model: {model_id}"
+        
+        # Get model config
+        model_config = MODEL_KEYS["models"][model_id]
+        
+        # Check if API key matches
+        if not provided_key or model_config.get("key") != provided_key:
+            return False, "Invalid model API key"
+        
+        # Check if API key has expired
+        if "expires" in model_config:
+            try:
+                expiry_time = datetime.fromisoformat(model_config["expires"]).timestamp()
+                if time.time() > expiry_time:
+                    return False, f"API key expired on {model_config['expires']}"
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error parsing expiry date: {e}")
+                return False, "Invalid expiry date format in configuration"
+        
+        # Check if tool is allowed for this model
+        tool_patterns = model_config.get("tools", [])
+        if not any(fnmatch(tool_name, pattern) for pattern in tool_patterns):
+            return False, f"Tool '{tool_name}' not in allowed scope for this model"
+        
+        # All checks passed
+        return True, ""
+        
+    except Exception as e:
+        logger.error(f"Error validating model key: {str(e)}")
+        return False, f"Key validation error: {str(e)}"
 
 def check_policy(model_id: str, tool_name: str, session_id: str) -> Tuple[bool, Optional[str]]:
     """

@@ -1,0 +1,188 @@
+SecureGateway Phase 2 (Hardening + Enhancements)
+🎯 Goal
+Implement the next security + operations layer for MCP-Sec Gateway by adding:
+
+🔐 Per-model API key enforcement (model_keys.yaml, X-Model-Key)
+
+🧪 Test suite (curl or built-in Flask test client)
+
+🐳 Deployment support (Dockerfile + render.yaml)
+
+🛠 Dashboard polish (session viewer, policy validator)
+
+📦 Optional features: policy versioning, SIEM hook, anomaly detection
+
+🔐 1. Model Access Key Enforcement
+Create model_keys.yaml:
+
+yaml
+Copy
+Edit
+models:
+  gpt-4o:
+    key: "modelkey-abc123"
+    tools: ["calendar.*", "search.*"]
+    expires: "2025-12-31T00:00:00Z"
+  mistral-open:
+    key: "modelkey-def456"
+    tools: ["search.*"]
+    expires: "2025-09-01T00:00:00Z"
+In policy_engine.py, add:
+
+python
+Copy
+Edit
+def validate_model_key(model_id, provided_key, tool_name):
+    try:
+        with open("model_keys.yaml") as f:
+            config = yaml.safe_load(f)
+        entry = config["models"].get(model_id)
+        if not entry or entry["key"] != provided_key:
+            return False, "Invalid API key"
+        if entry.get("expires") and time.time() > datetime.fromisoformat(entry["expires"]).timestamp():
+            return False, "API key expired"
+        if not any(fnmatch(tool_name, pattern) for pattern in entry["tools"]):
+            return False, f"Tool '{tool_name}' not in scope"
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+In mcp_routes.py, enforce at request start:
+
+python
+Copy
+Edit
+model_key = request.headers.get("X-Model-Key")
+ok, reason = validate_model_key(model_id, model_key, tool_name)
+if not ok:
+    return jsonify({"status": "unauthorized", "reason": reason}), 401
+🧪 2. Add Test Utilities
+Add test_gateway.py:
+
+python
+Copy
+Edit
+import requests
+
+URL = "http://localhost:8000"
+ADMIN = {"X-Admin-Key": "your-admin-key"}
+MODEL = {"X-Model-Key": "modelkey-abc123"}
+
+def post_toolcall(model_id, session_id, tool, input):
+    body = {
+        "model_id": model_id,
+        "session_id": session_id,
+        "tool_name": tool,
+        "input": input
+    }
+    r = requests.post(f"{URL}/mcp/toolcall", json=body, headers={**ADMIN, **MODEL})
+    print(r.status_code, r.json())
+
+# Run this:
+post_toolcall("gpt-4o", "abc123", "calendar.create_event", {
+    "title": "demo event",
+    "start_time": "2025-10-01T09:00:00Z"
+})
+🐳 3. Docker + Render Support
+Add Dockerfile:
+
+Dockerfile
+Copy
+Edit
+FROM python:3.11-slim
+WORKDIR /app
+COPY . .
+RUN pip install -r requirements.txt
+EXPOSE 8000
+CMD ["python", "main.py"]
+Add render.yaml:
+
+yaml
+Copy
+Edit
+services:
+  - type: web
+    name: mcp-sec-gateway
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: ADMIN_KEY
+        sync: false
+      - key: TOOL_SERVER_URL
+        sync: false
+🛠 4. Dashboard Upgrades
+Add /api/session/{id} in main.py:
+
+python
+Copy
+Edit
+@app.get("/api/session/<session_id>")
+@require_api_key
+def session_trace(session_id):
+    return SESSION_STATE.get(session_id, {})
+In /dash JS:
+Add tab to view full reasoning history:
+
+js
+Copy
+Edit
+function viewSession(id){
+  fetch("/api/session/" + id, {headers}).then(r => r.json())
+    .then(data => alert(JSON.stringify(data, null, 2)));
+}
+Policy YAML validator in /api/config:
+Before writing to policies.yaml, call:
+
+python
+Copy
+Edit
+try:
+    yaml.safe_load(data["policy_yaml"])
+except yaml.YAMLError as e:
+    return {"error": str(e)}, 400
+📦 5. Optional Enhancements
+🗂 A. Policy Versioning
+Before overwriting policies.yaml, back it up:
+
+python
+Copy
+Edit
+from shutil import copyfile
+backup_name = f"policies.{int(time.time())}.yaml"
+copyfile("policies.yaml", backup_name)
+Add /api/policy/rollback/<timestamp> to restore.
+
+📊 B. SIEM Log Hook
+In audit_logger.py, after writing to audit.log, post to SIEM:
+
+python
+Copy
+Edit
+if os.getenv("SIEM_URL"):
+    try:
+        requests.post(os.getenv("SIEM_URL"), json=event, timeout=2)
+    except Exception as e:
+        print("SIEM forward failed:", e)
+Add SIEM_URL to .env or Replit Secrets.
+
+🔍 C. Anomaly Detection (Denial Spike)
+In audit_logger.py, count denies in last 2 mins:
+
+python
+Copy
+Edit
+recent_denies = sum(1 for e in LOG_HISTORY[-100:]
+    if e["status"] == "denied" and time.time() - e["timestamp"] < 120)
+
+if recent_denies > 10:
+    print("🚨 Anomaly: denial spike detected")
+Later: route alerts to Slack, email, etc.
+
+✅ Commit Message
+bash
+Copy
+Edit
+git add .
+git commit -m "feat: model API keys, test suite, deploy files, SIEM, anomaly alerts"
+git push origin main

@@ -1,0 +1,21 @@
+models:
+  gpt-4o:
+    key: "modelkey-abc123"
+    tools: ["calendar.*", "search.*"]
+    expires: "2025-12-31T00:00:00Z"
+  mistral-open:
+    key: "modelkey-def456"
+    tools: ["search.*"]
+    expires: "2025-09-01T00:00:00Z"
+  claude-3-opus:
+    key: "modelkey-ghi789"
+    tools: ["calendar.*", "search.*", "file.*"]
+    expires: "2025-10-31T00:00:00Z"
+  gemini-pro:
+    key: "modelkey-jkl012"
+    tools: ["search.*"]
+    expires: "2025-08-15T00:00:00Z"
+  llama-3-70b:
+    key: "modelkey-mno345"
+    tools: ["search.*", "calendar.create_event"]
+    expires: "2025-11-30T00:00:00Z"

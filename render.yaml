@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: mcp-sec-gateway
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --reuse-port main:app
+    envVars:
+      - key: ADMIN_KEY
+        sync: false
+      - key: TOOL_SERVER_URL
+        sync: false
+      - key: PRODUCTION
+        value: true
