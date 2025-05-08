@@ -1,182 +1,192 @@
 """
-MCP Tools Catalog
-A catalog of MCP tool definitions, schemas, and metadata
-"""
+Tools Catalog Module
 
+This module provides access to standardized tool definitions and metadata.
+It serves as a central repository for all MCP tool schemas.
+"""
 import os
 import json
-import yaml
-import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any, Optional
 
-# Set up logging
-logger = logging.getLogger(__name__)
+# Cache for loaded schemas and metadata
+_schema_cache = {}
+_metadata_cache = {}
+_tools_list = None
 
-# Define base directories
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SCHEMAS_DIR = os.path.join(BASE_DIR, "schemas")
-METADATA_DIR = os.path.join(BASE_DIR, "metadata")
-
-# Cache for tool definitions
-_tool_schema_cache: Dict[str, Dict[str, Any]] = {}
-_tool_metadata_cache: Dict[str, Dict[str, Any]] = {}
-
-
-def load_schema(tool_name: str, schema_type: str = "input") -> Optional[Dict[str, Any]]:
+def get_all_tools() -> List[str]:
     """
-    Load a tool's JSON schema
+    Get a list of all available tools
+    
+    Returns:
+        List of tool names
+    """
+    global _tools_list
+    
+    if _tools_list is not None:
+        return _tools_list
+    
+    # Read from the tools directory
+    tools_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools")
+    
+    if not os.path.exists(tools_dir):
+        return []
+    
+    # Get all JSON files
+    _tools_list = []
+    for filename in os.listdir(tools_dir):
+        if filename.endswith(".json"):
+            _tools_list.append(filename.replace(".json", ""))
+    
+    return _tools_list
+
+def get_tool_schema(tool_name: str, schema_type: str = "input") -> Optional[Dict[str, Any]]:
+    """
+    Get the JSON schema for a tool
     
     Args:
         tool_name: Name of the tool
-        schema_type: Type of schema ('input' or 'output')
+        schema_type: Type of schema to get (input or output)
         
     Returns:
-        Dict containing the schema or None if not found
+        Schema definition or None if not found
     """
     cache_key = f"{tool_name}_{schema_type}"
-    if cache_key in _tool_schema_cache:
-        return _tool_schema_cache[cache_key]
     
-    # Check for tool-specific schema
-    schema_path = os.path.join(SCHEMAS_DIR, schema_type, f"{tool_name}.json")
-    if os.path.exists(schema_path):
-        try:
-            with open(schema_path, 'r') as f:
-                schema = json.load(f)
-                _tool_schema_cache[cache_key] = schema
-                return schema
-        except Exception as e:
-            logger.error(f"Error loading schema for {tool_name}: {str(e)}")
+    # Check cache first
+    if cache_key in _schema_cache:
+        return _schema_cache[cache_key]
     
-    # Check for wildcarded schemas (e.g., calendar.* -> calendar.json)
-    base_name = tool_name.split('.')[0]
-    if base_name != tool_name:
-        wildcarded_path = os.path.join(SCHEMAS_DIR, schema_type, f"{base_name}.json")
-        if os.path.exists(wildcarded_path):
-            try:
-                with open(wildcarded_path, 'r') as f:
-                    schema = json.load(f)
-                    _tool_schema_cache[cache_key] = schema
-                    return schema
-            except Exception as e:
-                logger.error(f"Error loading wildcarded schema for {tool_name}: {str(e)}")
+    # Look for the schema file
+    tools_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools")
+    schema_path = os.path.join(tools_dir, f"{tool_name}.json")
     
-    # No schema found
-    return None
+    if not os.path.exists(schema_path):
+        return None
+    
+    # Load the schema
+    try:
+        with open(schema_path, 'r') as f:
+            schema = json.load(f)
+            
+        # For output schemas, we need to look for output definitions
+        if schema_type == "output" and "output" in schema:
+            result = schema["output"]
+        else:
+            # For input schemas, we use the main schema
+            result = schema
+            
+        # Cache and return
+        _schema_cache[cache_key] = result
+        return result
+    except Exception as e:
+        print(f"Error loading schema for {tool_name}: {e}")
+        return None
 
-
-def load_metadata(tool_name: str) -> Dict[str, Any]:
+def get_tool_metadata(tool_name: str) -> Optional[Dict[str, Any]]:
     """
-    Load a tool's metadata
+    Get metadata for a tool
     
     Args:
         tool_name: Name of the tool
         
     Returns:
-        Dict containing the metadata or default metadata if not found
+        Tool metadata or None if not found
     """
-    if tool_name in _tool_metadata_cache:
-        return _tool_metadata_cache[tool_name]
+    # Check cache first
+    if tool_name in _metadata_cache:
+        return _metadata_cache[tool_name]
     
-    # Default metadata
-    default_metadata = {
+    # Get the schema to extract metadata
+    schema = get_tool_schema(tool_name)
+    if not schema:
+        return None
+    
+    # Extract metadata or use defaults
+    metadata = {
         "name": tool_name,
-        "description": f"Tool: {tool_name}",
-        "risk_level": "medium",
-        "risk_categories": ["unknown"],
-        "permission_level": "standard",
-        "required_api_key": False
+        "description": schema.get("description", f"Schema for {tool_name}"),
+        "version": schema.get("version", "1.0"),
+        "category": get_tool_categories(tool_name)[0],
+        "risk_level": get_tool_risk_level(tool_name)
     }
     
-    # Check for tool-specific metadata
-    metadata_path = os.path.join(METADATA_DIR, f"{tool_name}.yaml")
-    if os.path.exists(metadata_path):
-        try:
-            with open(metadata_path, 'r') as f:
-                metadata = yaml.safe_load(f)
-                _tool_metadata_cache[tool_name] = {**default_metadata, **metadata}
-                return _tool_metadata_cache[tool_name]
-        except Exception as e:
-            logger.error(f"Error loading metadata for {tool_name}: {str(e)}")
-    
-    # Check for wildcarded metadata (e.g., calendar.* -> calendar.yaml)
-    base_name = tool_name.split('.')[0]
-    if base_name != tool_name:
-        wildcarded_path = os.path.join(METADATA_DIR, f"{base_name}.yaml")
-        if os.path.exists(wildcarded_path):
-            try:
-                with open(wildcarded_path, 'r') as f:
-                    metadata = yaml.safe_load(f)
-                    _tool_metadata_cache[tool_name] = {**default_metadata, **metadata}
-                    return _tool_metadata_cache[tool_name]
-            except Exception as e:
-                logger.error(f"Error loading wildcarded metadata for {tool_name}: {str(e)}")
-    
-    # No metadata found, use default
-    _tool_metadata_cache[tool_name] = default_metadata
-    return default_metadata
-
+    # Cache and return
+    _metadata_cache[tool_name] = metadata
+    return metadata
 
 def get_tool_risk_level(tool_name: str) -> str:
     """
-    Get a tool's risk level
+    Determine the risk level for a tool
     
     Args:
         tool_name: Name of the tool
         
     Returns:
-        Risk level as string ('low', 'medium', or 'high')
+        Risk level: 'high', 'medium', or 'low'
     """
-    metadata = load_metadata(tool_name)
-    return metadata.get("risk_level", "medium")
+    # High risk patterns
+    high_risk_patterns = [
+        "file", "exec", "admin", "delete", "rm", "remove", 
+        "system", "command", "shell", "sudo", "root"
+    ]
+    
+    # Medium risk patterns
+    medium_risk_patterns = [
+        "write", "update", "modify", "create", "insert", 
+        "database", "db", "sql", "credential"
+    ]
+    
+    # Check for high risk patterns
+    for pattern in high_risk_patterns:
+        if pattern in tool_name.lower():
+            return "high"
+    
+    # Check for medium risk patterns
+    for pattern in medium_risk_patterns:
+        if pattern in tool_name.lower():
+            return "medium"
+    
+    # Default to low risk
+    return "low"
 
-
-def get_tool_risk_categories(tool_name: str) -> List[str]:
+def get_tool_categories(tool_name: str) -> List[str]:
     """
-    Get a tool's risk categories
+    Determine categories for a tool based on name patterns
     
     Args:
         tool_name: Name of the tool
         
     Returns:
-        List of risk categories
+        List of category strings
     """
-    metadata = load_metadata(tool_name)
-    return metadata.get("risk_categories", ["unknown"])
-
-
-def get_all_tools() -> List[Dict[str, Any]]:
-    """
-    Get all tools in the catalog
+    # Define category patterns
+    categories = {
+        "file_system": ["file", "directory", "folder", "path"],
+        "network": ["http", "url", "web", "fetch", "api"],
+        "database": ["db", "sql", "query", "database"],
+        "email": ["email", "mail", "smtp"],
+        "calendar": ["calendar", "event", "schedule"],
+        "system": ["exec", "system", "command", "shell"],
+        "auth": ["auth", "login", "credential", "token"]
+    }
     
-    Returns:
-        List of tool metadata dictionaries
-    """
-    tools = []
+    # Find matching categories
+    matching_categories = []
+    for category, patterns in categories.items():
+        for pattern in patterns:
+            if pattern in tool_name.lower():
+                matching_categories.append(category)
+                break
     
-    # Load tools from schema directories
-    for schema_type in ["input", "output"]:
-        schema_dir = os.path.join(SCHEMAS_DIR, schema_type)
-        if os.path.exists(schema_dir):
-            for filename in os.listdir(schema_dir):
-                if filename.endswith(".json"):
-                    tool_name = filename[:-5]  # Remove .json extension
-                    tools.append(load_metadata(tool_name))
+    # Default to "utility" if no categories match
+    if not matching_categories:
+        return ["utility"]
     
-    # Load tools from metadata directory
-    if os.path.exists(METADATA_DIR):
-        for filename in os.listdir(METADATA_DIR):
-            if filename.endswith(".yaml") or filename.endswith(".yml"):
-                tool_name = filename.rsplit('.', 1)[0]  # Remove extension
-                if not any(t["name"] == tool_name for t in tools):
-                    tools.append(load_metadata(tool_name))
-    
-    return tools
+    return matching_categories
 
-
-def clear_cache() -> None:
-    """
-    Clear all caches
-    """
-    _tool_schema_cache.clear()
-    _tool_metadata_cache.clear()
+def clear_cache():
+    """Clear all caches"""
+    global _schema_cache, _metadata_cache, _tools_list
+    _schema_cache = {}
+    _metadata_cache = {}
+    _tools_list = None

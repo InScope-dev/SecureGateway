@@ -1,23 +1,60 @@
 {
-  "description": "Create a calendar event",
-  "required": [
-    "title",
-    "start_time"
-  ],
+  "name": "calendar.create_event",
+  "description": "Create a new calendar event",
+  "version": "1.0",
   "properties": {
     "title": {
-      "type": "string"
+      "type": "string",
+      "description": "Title of the event"
     },
     "start_time": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "Start time of the event (ISO 8601 format)"
     },
     "end_time": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "End time of the event (ISO 8601 format)"
+    },
+    "duration_minutes": {
+      "type": "integer",
+      "description": "Duration of the event in minutes (alternative to end_time)"
     },
     "location": {
-      "type": "string"
+      "type": "string",
+      "description": "Location of the event"
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the event"
+    },
+    "attendees": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "email"
+      },
+      "description": "List of attendee email addresses"
     }
+  },
+  "required": ["title", "start_time"],
+  "additionalProperties": false,
+  "output": {
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Unique identifier for the created event"
+      },
+      "status": {
+        "type": "string",
+        "description": "Status of the event creation"
+      },
+      "calendar_link": {
+        "type": "string",
+        "description": "URL to view the event"
+      }
+    },
+    "required": ["id", "status"]
   }
 }
