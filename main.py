@@ -1077,12 +1077,378 @@ def monitor():
             logs.reverse()  # Show newest first
     except:
         pass
+    
+    # Get metrics
+    total_requests = len(logs)
+    allowed = len([log for log in logs if log.get("status") == "allowed"])
+    denied = len([log for log in logs if log.get("status") == "denied"])
+    errors = len([log for log in logs if log.get("status") == "error"])
+    
+    # Format logs for display
+    formatted_logs = []
+    for log in logs:
+        formatted_log = {
+            "timestamp": log.get("timestamp", ""),
+            "model_id": log.get("model_id", ""),
+            "tool": log.get("tool", ""),
+            "status": log.get("status", ""),
+            "reason": log.get("reason", ""),
+            "risk_score": log.get("risk_score", 0.0),
+            "latency_ms": log.get("latency_ms", 0)
+        }
+        
+        # Add explainable decision details if available
+        if "reasoning" in log:
+            formatted_log["reasoning"] = log["reasoning"]
+        if "rule_trace" in log:
+            formatted_log["rule_trace"] = log["rule_trace"]
+            
+        formatted_logs.append(formatted_log)
+    
+    # Main HTML content
+    html_parts = []
+    
+    # Start of HTML
+    html_parts.append(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP-Sec Monitor</title>
+    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    <style>
+        .status-allowed {{ background-color: rgba(40, 167, 69, 0.2); }}
+        .status-denied {{ background-color: rgba(220, 53, 69, 0.2); }}
+        .status-error {{ background-color: rgba(255, 193, 7, 0.2); }}
+        pre {{ background: #222; padding: 10px; border-radius: 4px; overflow: auto; }}
+    </style>
+</head>
+<body>
+    <div class="container-fluid p-4">
+        <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center">
+            <h1 class="h3">MCP-Sec Gateway Monitor</h1>
+            <div>
+                <a href="/" class="btn btn-sm btn-outline-secondary me-2">Home</a>
+                <a href="/admin" class="btn btn-sm btn-outline-danger">Admin Panel</a>
+            </div>
+        </header>
+
+        <div class="row mb-4">
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-primary bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Total Requests</h6>
+                        <h2 class="card-title">{total_requests}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-success bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Allowed</h6>
+                        <h2 class="card-title">{allowed}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-danger bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Denied</h6>
+                        <h2 class="card-title">{denied}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-warning bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Errors</h6>
+                        <h2 class="card-title">{errors}</h2>
+                    </div>
+                </div>
+            </div>
+        </div>""")
+    
+    # Logs table
+    logs_table = """
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Recent Audit Logs</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Model</th>
+                                        <th>Tool</th>
+                                        <th>Status</th>
+                                        <th>Reason</th>
+                                    </tr>
+                                </thead>
+                                <tbody>"""
+    
+    if formatted_logs:
+        for log in formatted_logs:
+            logs_table += f"""
+                                    <tr class="status-{log['status']}">
+                                        <td>{log['timestamp']}</td>
+                                        <td>{log['model_id']}</td>
+                                        <td>{log['tool']}</td>
+                                        <td>{log['status']}</td>
+                                        <td>{log['reason'] or ''}</td>
+                                    </tr>"""
+    else:
+        logs_table += """
+                                    <tr><td colspan="5" class="text-center py-3">No audit logs found</td></tr>"""
+        
+    logs_table += """
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>"""
+    
+    html_parts.append(logs_table)
+    
+    # Tools catalog section
+    tools_section = """
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Tools Catalog</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="list-group" id="tool_list">
+                                    <div class="d-flex justify-content-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <pre id="tool_detail" class="p-3 bg-dark text-light rounded" style="min-height: 200px;">Select a tool to view details</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>"""
+    
+    html_parts.append(tools_section)
+    
+    # Add JavaScript
+    html_parts.append("""
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Load tools catalog
+        loadToolsCatalog();
+    });
+    
+    // Function to load tools catalog
+    function loadToolsCatalog() {
+        const toolList = document.getElementById('tool_list');
+        const toolDetail = document.getElementById('tool_detail');
+        
+        fetch('/tools')
+            .then(response => response.json())
+            .then(data => {
+                // Clear loading spinner
+                toolList.innerHTML = '';
+                
+                if (!data.tools || data.tools.length === 0) {
+                    toolList.innerHTML = '<div class="alert alert-info">No tools found in catalog</div>';
+                    return;
+                }
+                
+                // Sort tools by name
+                data.tools.sort();
+                
+                // Create list items for each tool
+                data.tools.forEach(toolName => {
+                    const listItem = document.createElement('a');
+                    listItem.href = '#';
+                    listItem.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+                    listItem.textContent = toolName;
+                    
+                    // Add risk badge based on tool name pattern matching
+                    // This will be replaced with actual risk data from tool metadata once available
+                    let riskBadge = '';
+                    if (toolName.includes('file') || toolName.includes('exec') || toolName.includes('admin')) {
+                        riskBadge = '<span class="badge bg-danger">High Risk</span>';
+                    } else if (toolName.includes('write') || toolName.includes('delete') || toolName.includes('update')) {
+                        riskBadge = '<span class="badge bg-warning text-dark">Medium Risk</span>';
+                    } else {
+                        riskBadge = '<span class="badge bg-success">Low Risk</span>';
+                    }
+                    
+                    // Add the risk badge to the list item
+                    listItem.innerHTML += riskBadge;
+                    
+                    // Add click event to load tool details
+                    listItem.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        
+                        // Highlight the selected tool
+                        document.querySelectorAll('#tool_list a').forEach(item => {
+                            item.classList.remove('active');
+                        });
+                        this.classList.add('active');
+                        
+                        // Load and display tool details
+                        loadToolDetails(toolName);
+                    });
+                    
+                    toolList.appendChild(listItem);
+                });
+            })
+            .catch(error => {
+                toolList.innerHTML = `<div class="alert alert-danger">Error loading tools: ${error.message}</div>`;
+            });
+    }
+    
+    // Function to load details for a specific tool
+    function loadToolDetails(toolName) {
+        const toolDetail = document.getElementById('tool_detail');
+        
+        // Show loading indicator
+        toolDetail.textContent = 'Loading tool details...';
+        
+        fetch('/tools/' + toolName)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    toolDetail.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                
+                // Format and display the tool details
+                toolDetail.textContent = JSON.stringify(data, null, 2);
+            })
+            .catch(error => {
+                toolDetail.textContent = 'Error loading tool details: ' + error.message;
+            });
+    }
+    </script>
+    </body>
+    </html>""")
+    
+    # Join all parts
+    return "".join(html_parts)
         
 @app.route("/admin")
 @require_api_key
 def admin():
     """Admin dashboard with full configuration options and detailed metrics"""
     api_key = request.args.get("api_key", "")
+    
+    # Get recent logs
+    logs = []
+    try:
+        with open("audit.log", "r") as f:
+            logs = [json.loads(line) for line in f.readlines()]
+            logs = logs[-50:]  # Get most recent 50 logs
+            logs.reverse()  # Show newest first
+    except:
+        pass
+    
+    # Get metrics
+    total_requests = len(logs)
+    allowed = len([log for log in logs if log.get("status") == "allowed"])
+    denied = len([log for log in logs if log.get("status") == "denied"])
+    errors = len([log for log in logs if log.get("status") == "error"])
+    
+    # Format logs for display
+    formatted_logs = []
+    for log in logs:
+        formatted_log = {
+            "timestamp": log.get("timestamp", ""),
+            "model_id": log.get("model_id", ""),
+            "tool": log.get("tool", ""),
+            "status": log.get("status", ""),
+            "reason": log.get("reason", ""),
+            "risk_score": log.get("risk_score", 0.0),
+            "latency_ms": log.get("latency_ms", 0)
+        }
+        
+        # Add explainable decision details if available
+        if "reasoning" in log:
+            formatted_log["reasoning"] = log["reasoning"]
+        if "rule_trace" in log:
+            formatted_log["rule_trace"] = log["rule_trace"]
+            
+        formatted_logs.append(formatted_log)
+    
+    # Main HTML content
+    html_parts = []
+    
+    # Start of HTML
+    html_parts.append(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP-Sec Admin Dashboard</title>
+    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+    <style>
+        .status-allowed {{ background-color: rgba(40, 167, 69, 0.2); }}
+        .status-denied {{ background-color: rgba(220, 53, 69, 0.2); }}
+        .status-error {{ background-color: rgba(255, 193, 7, 0.2); }}
+        pre {{ background: #222; padding: 10px; border-radius: 4px; overflow: auto; }}
+    </style>
+</head>
+<body>
+    <div class="container-fluid p-4">
+        <header class="pb-3 mb-4 border-bottom d-flex justify-content-between align-items-center">
+            <h1 class="h3">MCP-Sec Gateway Admin Dashboard</h1>
+            <div>
+                <a href="/" class="btn btn-sm btn-outline-secondary me-2">Home</a>
+                <a href="/monitor" class="btn btn-sm btn-outline-primary">Monitoring</a>
+            </div>
+        </header>
+
+        <div class="row mb-4">
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-primary bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Total Requests</h6>
+                        <h2 class="card-title">{total_requests}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-success bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Allowed</h6>
+                        <h2 class="card-title">{allowed}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-danger bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Denied</h6>
+                        <h2 class="card-title">{denied}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card text-center bg-warning bg-opacity-25 h-100">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Errors</h6>
+                        <h2 class="card-title">{errors}</h2>
+                    </div>
+                </div>
+            </div>
+        </div>""")
     
     # Get metrics
     total_requests = len(logs)
